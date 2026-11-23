@@ -46,7 +46,8 @@ const defaultArgs = {
   githubProxy: "",
 }
 
-let args = typeof $arguments !== 'undefined' ? $arguments : defaultArgs
+let args =
+  typeof $arguments !== 'undefined' && $arguments && typeof $arguments === 'object' ? $arguments : defaultArgs
 
 args = {
   ...defaultArgs,
@@ -86,6 +87,15 @@ let {
   logLevel = args.logLevel ?? 'error',
   githubProxy = args.githubProxy ?? '',
 } = args
+
+function applyGithubProxy(url) {
+  if (!githubProxy || typeof url !== 'string') return url
+  const prefix = githubProxy.endsWith('/') ? githubProxy : githubProxy + '/'
+  if (/^https?:\/\/(github\.com|raw\.githubusercontent\.com|gist\.githubusercontent\.com)\//i.test(url)) {
+    return prefix + url
+  }
+  return url
+}
 
 /**
  * 模式配置
@@ -267,7 +277,7 @@ const allRegionDefinitions = [
 let regionDefinitions = []
 if (regionSet === 'all') {
   regionDefinitions = allRegionDefinitions
-} else {
+} else if (typeof regionSet === 'string') {
   const enabledRegions = regionSet.split(';').map((s) => s.trim()).filter(Boolean)
   regionDefinitions = allRegionDefinitions.filter((r) => {
     const prefix = r.name.substring(0, 2)
@@ -278,7 +288,6 @@ if (regionSet === 'all') {
 const dnsConfig = {
   enable: !!dns,
   listen: "0.0.0.0:1053",
-  ipv6: !!ipv6,
   'log-level': logLevel,
   'prefer-h3': false,
   'use-hosts': true,
@@ -338,7 +347,7 @@ const ruleProviders = {
 }
 
 // 倍率正则预编译
-const multiplierRegex = /(?<=[xX✕✖⨉倍率])([1-9]+(\.\d+)*|0{1}\.\d+)(?=[xX✕✖⨉倍率])*/i
+const multiplierRegex = /(?<![a-zA-Z0-9.])(?:(?:[xX×✕✖⨉]|倍率[:：]?)\s*([1-9]\d*(?:\.\d+)?|0(?:\.\d+)?)|([1-9]\d*(?:\.\d+)?|0(?:\.\d+)?)(?:[xX×✕✖⨉](?![a-zA-Z])|\s*倍))/i
 
 // --- 2. 服务规则数据结构 ---
 const serviceConfigs = [
@@ -509,7 +518,7 @@ const serviceConfigs = [
   {
     key: "whatsapp",
     name: "WhatsApp",
-    icon: "https://static.whatsapp.net/rsrc.php/v3/yP/r/rYZqPCBaG70.png",
+    icon: "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/WhatsApp.png",
     url: "https://web.whatsapp.com/data/manifest.json",
     rules: [
       "GEOSITE,whatsapp,WhatsApp",
@@ -521,7 +530,8 @@ const serviceConfigs = [
     icon: "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Telegram.png",
     url: "https://www.telegram.org/img/website_icon.svg",
     rules: [
-      "GEOIP,telegram,Telegram",
+      "GEOSITE,telegram,Telegram",
+      "GEOIP,telegram,Telegram,no-resolve",
     ],
   },
   {
@@ -647,7 +657,7 @@ const serviceConfigs = [
     key: "pixiv",
     name: "Pixiv",
     icon: "https://play-lh.googleusercontent.com/8pFuLOHF62ADcN0ISUAyEueA5G8IF49mX_6Az6pQNtokNVHxIVbS1L2NM62H-k02rLM=w240-h480-rw",
-    url: "http://spclient.wg.spotify.com/signup/public/v1/account",
+    url: "https://www.pixiv.net/",
     rules: [
       "GEOSITE,pixiv,Pixiv",
     ],
@@ -708,42 +718,35 @@ function main(config) {
   const proxies = config?.proxies || []
   const proxyCount = proxies.length
   const proxyProviderCount =
-    typeof config?.['proxy-providers'] === 'object' ? Object.keys(config['proxy-providers']).length : 0
+    config?.['proxy-providers'] && typeof config['proxy-providers'] === 'object'
+      ? Object.keys(config['proxy-providers']).length
+      : 0
 
   if (proxyCount === 0 && proxyProviderCount === 0) {
     throw new Error('配置文件中未找到任何代理')
   }
 
   // 3.1 覆盖基础配置
-  config['allow-lan'] = true
+  // 未写入 Clash Verge 接管字段：mode、ipv6、allow-lan、unified-delay、端口、external-controller、secret、external-controller-cors，以及 TUN 设置页中的协议栈、网卡、路由、DNS 劫持、严格路由、MTU。
+  // 这些值以 Clash Verge 设置页为准。其他客户端需要脚本写入时，打开工作台的「导出时写入 Clash Verge 接管字段」。
   config['bind-address'] = "*"
-  config['mode'] = 'rule'
-  config['ipv6'] = !!ipv6
-  config['external-controller'] = "127.0.0.1:9090"
-  config['external-controller-cors'] = {
-    'allow-origins': ["*"],
-    'allow-private-network': true,
-  }
-  config['secret'] = "YaNet"
-  config['port'] = 7890
-  config['socks-port'] = 7891
-  config['mixed-port'] = 7892
-  config['redir-port'] = 7893
-  config['tproxy-port'] = 7894
   config['external-ui'] = "ui"
-  config['external-ui-url'] = githubProxy + "https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip"
+  config['external-ui-url'] = applyGithubProxy("https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip")
+  const finalDnsConfig = { ...dnsConfig }
+  if (config.dns && Object.prototype.hasOwnProperty.call(config.dns, 'ipv6')) {
+    finalDnsConfig.ipv6 = config.dns.ipv6
+  }
   if (config.dns?.['proxy-server-nameserver']) {
-    dnsConfig['proxy-server-nameserver'] = config.dns?.['proxy-server-nameserver']
+    finalDnsConfig['proxy-server-nameserver'] = config.dns['proxy-server-nameserver']
   }
   if (config.dns?.['proxy-server-nameserver-policy']) {
-    dnsConfig['proxy-server-nameserver-policy'] = config.dns?.['proxy-server-nameserver-policy']
+    finalDnsConfig['proxy-server-nameserver-policy'] = config.dns['proxy-server-nameserver-policy']
   }
-  config['dns'] = dnsConfig
+  config['dns'] = finalDnsConfig
   config['profile'] = {
     'store-selected': true,
     'store-fake-ip': true,
   }
-  config['unified-delay'] = true
   config['tcp-concurrent'] = true
   config['keep-alive-interval'] = 1800
   config['find-process-mode'] = "strict"
@@ -782,25 +785,16 @@ function main(config) {
     server: "cn.ntp.org.cn",
   }
   config['tun'] = {
-    enable: true,
-    stack: "mixed",
-    device: "utun1999",
-    'auto-route': true,
-    'auto-redirect': true,
-    'auto-detect-interface': true,
-    'strict-route': true,
-    mtu: 1500,
+    ...(config['tun'] && typeof config['tun'] === 'object' ? config['tun'] : {}),
     gso: true,
     'gso-max-size': 65536,
     'exclude-interface': ["NodeBabyLink"],
-    'route-exclude-address': skipIps.filter((ip) => ip !== '198.18.0.0/16'),
-    'dns-hijack': ["any:53","tcp://any:53"],
   }
   config['geox-url'] = {
-    geoip: githubProxy + "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip-lite.dat",
-    geosite: githubProxy + "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat",
-    mmdb: githubProxy + "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.metadb",
-    asn: githubProxy + "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/GeoLite2-ASN.mmdb",
+    geoip: applyGithubProxy("https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip-lite.dat"),
+    geosite: applyGithubProxy("https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat"),
+    mmdb: applyGithubProxy("https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.metadb"),
+    asn: applyGithubProxy("https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/GeoLite2-ASN.mmdb"),
   }
 
   if (!Array.isArray(config.proxies)) {
@@ -839,8 +833,12 @@ function main(config) {
     // 检查倍率
     if (excludeHighPercentage) {
       const match = multiplierRegex.exec(name)
-      if (match && parseFloat(match[1]) > globalRatioLimit) {
-        continue
+      const ratioStr = match ? (match[1] ?? match[2]) : null
+      if (ratioStr !== null && ratioStr !== undefined) {
+        const ratio = parseFloat(ratioStr)
+        if (Number.isFinite(ratio) && ratio > globalRatioLimit) {
+          continue
+        }
       }
     }
 
@@ -873,7 +871,7 @@ function main(config) {
     }
   })
 
-  const regionGroupNames = generatedRegionGroups.map((g) => g.name).sort()
+  const regionGroupNames = generatedRegionGroups.map((g) => g.name)
 
   function preferRegionFirst(list, prefix) {
     const tag = String(prefix || '')
@@ -882,8 +880,6 @@ function main(config) {
     if (!hit) return list
     return [hit, ...list.filter((name) => name !== hit)]
   }
-
-  const sgFirstKeys = new Set(['ai_cursor', 'ai_gemini', 'ai_openai', 'ai_claude', 'ai_grok', 'ai_other'])
 
   if (otherProxies.length > 0) {
     generatedRegionGroups.push({
@@ -896,6 +892,13 @@ function main(config) {
   }
 
   // 3.3 构建功能策略组
+  const finalRules = [...rules]
+  const finalRuleProviders = Object.fromEntries(
+    Object.entries(ruleProviders).map(([key, p]) => [
+      key,
+      { ...p, url: applyGithubProxy(p.url) },
+    ])
+  )
   const functionalGroups = []
 
   functionalGroups.push({
@@ -908,22 +911,22 @@ function main(config) {
 
   serviceConfigs.forEach((svc) => {
     if (ruleOptions[svc.key]) {
-      rules.push(...svc.rules)
+      finalRules.push(...svc.rules)
 
       if (Array.isArray(svc.providers)) {
         svc.providers.forEach((p) => {
-          ruleProviders[p.key] = {
+          finalRuleProviders[p.key] = {
             ...ruleProviderCommon,
             behavior: p.behavior,
             format: p.format,
-            url: p.url,
+            url: applyGithubProxy(p.url),
             path: p.path,
           }
         })
       }
 
       let groupProxies
-      const preferPrefix = svc.preferRegion || (sgFirstKeys.has(svc.key) ? 'SG' : '')
+      const preferPrefix = svc.preferRegion || ''
       if (svc.reject) {
         groupProxies = ["拒绝", "直连", "默认节点"]
       } else if (svc.directFirst || svc.key === 'biliintl' || svc.key === 'bahamut') {
@@ -947,7 +950,7 @@ function main(config) {
   })
 
   // 3.4 添加通用兜底策略组
-  rules.push(
+  finalRules.push(
     "GEOSITE,private,直连",
     "GEOSITE,category-public-tracker,直连",
     "GEOSITE,category-game-platforms-download@cn,直连",
@@ -986,11 +989,11 @@ function main(config) {
   // 3.5 组装最终结果
   config['proxy-groups'] = [
     ...functionalGroups,
-    ...generatedRegionGroups.sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' })),
+    ...generatedRegionGroups,
   ]
 
-  config['rules'] = rules
-  config['rule-providers'] = ruleProviders
+  config['rules'] = finalRules
+  config['rule-providers'] = finalRuleProviders
 
   return config
 }

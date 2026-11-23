@@ -1,7 +1,8 @@
 ;(function (global) {
   'use strict'
 
-  const MULTIPLIER_REGEX = /(?<=[xX✕✖⨉倍率])([1-9]+(\.\d+)*|0{1}\.\d+)(?=[xX✕✖⨉倍率])*/i
+  const MULTIPLIER_REGEX =
+    /(?<![a-zA-Z0-9.])(?:(?:[xX×✕✖⨉]|倍率[:：]?)\s*([1-9]\d*(?:\.\d+)?|0(?:\.\d+)?)|([1-9]\d*(?:\.\d+)?|0(?:\.\d+)?)(?:[xX×✕✖⨉](?![a-zA-Z])|\s*倍))/i
 
   function jsStr(str) {
     return JSON.stringify(String(str ?? ''))
@@ -219,6 +220,59 @@
       .join('\n')
 
     const effectiveMode = args.mode === 'custom' ? '' : args.mode
+    const includeVergeManaged = Boolean(state.exportOptions && state.exportOptions.includeVergeManaged)
+    const tunExcludeInterface = JSON.stringify((tun.excludeInterface || []).map((x) => x.trim()).filter(Boolean))
+    const tunDnsHijack = JSON.stringify((tun.dnsHijack || []).map((x) => x.trim()).filter(Boolean))
+    const vergeManagedHead = includeVergeManaged
+      ? `  config['allow-lan'] = ${Boolean(core.allowLan)}`
+      : `  // 未写入 Clash Verge 接管字段：mode、ipv6、allow-lan、unified-delay、端口、external-controller、secret、external-controller-cors，以及 TUN 设置页中的协议栈、网卡、路由、DNS 劫持、严格路由、MTU。
+  // 这些值以 Clash Verge 设置页为准。其他客户端需要脚本写入时，打开工作台的「导出时写入 Clash Verge 接管字段」。`
+    const vergeManagedBody = includeVergeManaged
+      ? `  config['mode'] = 'rule'
+  config['ipv6'] = !!ipv6
+  config['external-controller'] = ${jsStr(core.externalController)}
+  config['external-controller-cors'] = {
+    'allow-origins': ${JSON.stringify(corsOrigins.length ? corsOrigins : ['*'])},
+    'allow-private-network': ${Boolean(core.corsAllowPrivateNetwork)},
+  }
+  config['secret'] = ${jsStr(core.secret)}
+  config['port'] = ${numOr(core.port, 7890)}
+  config['socks-port'] = ${numOr(core.socksPort, 7891)}
+  config['mixed-port'] = ${numOr(core.mixedPort, 7892)}
+  config['redir-port'] = ${numOr(core.redirPort, 7893)}
+  config['tproxy-port'] = ${numOr(core.tproxyPort, 7894)}
+`
+      : ''
+    const vergeManagedDelay = includeVergeManaged ? `  config['unified-delay'] = ${Boolean(core.unifiedDelay)}\n` : ''
+    const dnsIpv6Line = includeVergeManaged ? `  ipv6: !!ipv6,\n` : ''
+    const dnsIpv6Preserve = includeVergeManaged
+      ? ''
+      : `  if (config.dns && Object.prototype.hasOwnProperty.call(config.dns, 'ipv6')) {
+    finalDnsConfig.ipv6 = config.dns.ipv6
+  }
+`
+    const tunAssignment = includeVergeManaged
+      ? `  config['tun'] = {
+    enable: ${Boolean(tun.enable)},
+    stack: ${jsStr(tun.stack)},
+    device: ${jsStr(tun.device)},
+    'auto-route': ${Boolean(tun.autoRoute)},
+    'auto-redirect': ${Boolean(tun.autoRedirect)},
+    'auto-detect-interface': ${Boolean(tun.autoDetectInterface)},
+    'strict-route': ${Boolean(tun.strictRoute)},
+    mtu: ${numOr(tun.mtu, 1500)},
+    gso: ${Boolean(tun.gso)},
+    'gso-max-size': ${numOr(tun.gsoMaxSize, 65536)},
+    'exclude-interface': ${tunExcludeInterface},
+    'route-exclude-address': skipIps.filter((ip) => ip !== '198.18.0.0/16'),
+    'dns-hijack': ${tunDnsHijack},
+  }`
+      : `  config['tun'] = {
+    ...(config['tun'] && typeof config['tun'] === 'object' ? config['tun'] : {}),
+    gso: ${Boolean(tun.gso)},
+    'gso-max-size': ${numOr(tun.gsoMaxSize, 65536)},
+    'exclude-interface': ${tunExcludeInterface},
+  }`
 
     return `/***
  * Clash Verge Rev / Mihomo Party 分流规则脚本
@@ -268,7 +322,8 @@ const defaultArgs = {
   githubProxy: ${jsStr(args.githubProxy)},
 }
 
-let args = typeof $arguments !== 'undefined' ? $arguments : defaultArgs
+let args =
+  typeof $arguments !== 'undefined' && $arguments && typeof $arguments === 'object' ? $arguments : defaultArgs
 
 args = {
   ...defaultArgs,
@@ -308,6 +363,15 @@ let {
   logLevel = args.logLevel ?? 'error',
   githubProxy = args.githubProxy ?? '',
 } = args
+
+function applyGithubProxy(url) {
+  if (!githubProxy || typeof url !== 'string') return url
+  const prefix = githubProxy.endsWith('/') ? githubProxy : githubProxy + '/'
+  if (/^https?:\\/\\/(github\\.com|raw\\.githubusercontent\\.com|gist\\.githubusercontent\\.com)\\//i.test(url)) {
+    return prefix + url
+  }
+  return url
+}
 
 /**
  * 模式配置
@@ -384,7 +448,7 @@ ${regionLines}
 let regionDefinitions = []
 if (regionSet === 'all') {
   regionDefinitions = allRegionDefinitions
-} else {
+} else if (typeof regionSet === 'string') {
   const enabledRegions = regionSet.split(';').map((s) => s.trim()).filter(Boolean)
   regionDefinitions = allRegionDefinitions.filter((r) => {
     const prefix = r.name.substring(0, 2)
@@ -395,8 +459,7 @@ if (regionSet === 'all') {
 const dnsConfig = {
   enable: !!dns,
   listen: ${jsStr(dnsExtra.listen)},
-  ipv6: !!ipv6,
-  'log-level': logLevel,
+${dnsIpv6Line}  'log-level': logLevel,
   'prefer-h3': ${Boolean(dnsExtra.preferH3)},
   'use-hosts': ${Boolean(dnsExtra.useHosts)},
   'use-system-hosts': ${Boolean(dnsExtra.useSystemHosts)},
@@ -452,43 +515,32 @@ function main(config) {
   const proxies = config?.proxies || []
   const proxyCount = proxies.length
   const proxyProviderCount =
-    typeof config?.['proxy-providers'] === 'object' ? Object.keys(config['proxy-providers']).length : 0
+    config?.['proxy-providers'] && typeof config['proxy-providers'] === 'object'
+      ? Object.keys(config['proxy-providers']).length
+      : 0
 
   if (proxyCount === 0 && proxyProviderCount === 0) {
     throw new Error('配置文件中未找到任何代理')
   }
 
   // 3.1 覆盖基础配置
-  config['allow-lan'] = ${Boolean(core.allowLan)}
+${vergeManagedHead}
   config['bind-address'] = ${jsStr(core.bindAddress)}
-  config['mode'] = 'rule'
-  config['ipv6'] = !!ipv6
-  config['external-controller'] = ${jsStr(core.externalController)}
-  config['external-controller-cors'] = {
-    'allow-origins': ${JSON.stringify(corsOrigins.length ? corsOrigins : ['*'])},
-    'allow-private-network': ${Boolean(core.corsAllowPrivateNetwork)},
-  }
-  config['secret'] = ${jsStr(core.secret)}
-  config['port'] = ${numOr(core.port, 7890)}
-  config['socks-port'] = ${numOr(core.socksPort, 7891)}
-  config['mixed-port'] = ${numOr(core.mixedPort, 7892)}
-  config['redir-port'] = ${numOr(core.redirPort, 7893)}
-  config['tproxy-port'] = ${numOr(core.tproxyPort, 7894)}
-  config['external-ui'] = ${jsStr(core.externalUi)}
-  config['external-ui-url'] = githubProxy + ${jsStr(core.externalUiUrl)}
-  if (config.dns?.['proxy-server-nameserver']) {
-    dnsConfig['proxy-server-nameserver'] = config.dns?.['proxy-server-nameserver']
+${vergeManagedBody}  config['external-ui'] = ${jsStr(core.externalUi)}
+  config['external-ui-url'] = applyGithubProxy(${jsStr(core.externalUiUrl)})
+  const finalDnsConfig = { ...dnsConfig }
+${dnsIpv6Preserve}  if (config.dns?.['proxy-server-nameserver']) {
+    finalDnsConfig['proxy-server-nameserver'] = config.dns['proxy-server-nameserver']
   }
   if (config.dns?.['proxy-server-nameserver-policy']) {
-    dnsConfig['proxy-server-nameserver-policy'] = config.dns?.['proxy-server-nameserver-policy']
+    finalDnsConfig['proxy-server-nameserver-policy'] = config.dns['proxy-server-nameserver-policy']
   }
-  config['dns'] = dnsConfig
+  config['dns'] = finalDnsConfig
   config['profile'] = {
     'store-selected': ${Boolean(core.profileStoreSelected)},
     'store-fake-ip': ${Boolean(core.profileStoreFakeIp)},
   }
-  config['unified-delay'] = ${Boolean(core.unifiedDelay)}
-  config['tcp-concurrent'] = ${Boolean(core.tcpConcurrent)}
+${vergeManagedDelay}  config['tcp-concurrent'] = ${Boolean(core.tcpConcurrent)}
   config['keep-alive-interval'] = ${numOr(core.keepAliveInterval, 1800)}
   config['find-process-mode'] = ${jsStr(core.findProcessMode)}
   config['geodata-mode'] = ${Boolean(core.geodataMode)}
@@ -525,26 +577,12 @@ function main(config) {
     'write-to-system': ${Boolean(ntp.writeToSystem)},
     server: ${jsStr(ntp.server)},
   }
-  config['tun'] = {
-    enable: ${Boolean(tun.enable)},
-    stack: ${jsStr(tun.stack)},
-    device: ${jsStr(tun.device)},
-    'auto-route': ${Boolean(tun.autoRoute)},
-    'auto-redirect': ${Boolean(tun.autoRedirect)},
-    'auto-detect-interface': ${Boolean(tun.autoDetectInterface)},
-    'strict-route': ${Boolean(tun.strictRoute)},
-    mtu: ${numOr(tun.mtu, 1500)},
-    gso: ${Boolean(tun.gso)},
-    'gso-max-size': ${numOr(tun.gsoMaxSize, 65536)},
-    'exclude-interface': ${JSON.stringify((tun.excludeInterface || []).map((x) => x.trim()).filter(Boolean))},
-    'route-exclude-address': skipIps.filter((ip) => ip !== '198.18.0.0/16'),
-    'dns-hijack': ${JSON.stringify((tun.dnsHijack || []).map((x) => x.trim()).filter(Boolean))},
-  }
+${tunAssignment}
   config['geox-url'] = {
-    geoip: githubProxy + ${jsStr(core.geoxGeoip)},
-    geosite: githubProxy + ${jsStr(core.geoxGeosite)},
-    mmdb: githubProxy + ${jsStr(core.geoxMmdb)},
-    asn: githubProxy + ${jsStr(core.geoxAsn)},
+    geoip: applyGithubProxy(${jsStr(core.geoxGeoip)}),
+    geosite: applyGithubProxy(${jsStr(core.geoxGeosite)}),
+    mmdb: applyGithubProxy(${jsStr(core.geoxMmdb)}),
+    asn: applyGithubProxy(${jsStr(core.geoxAsn)}),
   }
 
   if (!Array.isArray(config.proxies)) {
@@ -583,8 +621,12 @@ function main(config) {
     // 检查倍率
     if (excludeHighPercentage) {
       const match = multiplierRegex.exec(name)
-      if (match && parseFloat(match[1]) > globalRatioLimit) {
-        continue
+      const ratioStr = match ? (match[1] ?? match[2]) : null
+      if (ratioStr !== null && ratioStr !== undefined) {
+        const ratio = parseFloat(ratioStr)
+        if (Number.isFinite(ratio) && ratio > globalRatioLimit) {
+          continue
+        }
       }
     }
 
@@ -617,7 +659,7 @@ function main(config) {
     }
   })
 
-  const regionGroupNames = generatedRegionGroups.map((g) => g.name).sort()
+  const regionGroupNames = generatedRegionGroups.map((g) => g.name)
 
   function preferRegionFirst(list, prefix) {
     const tag = String(prefix || '')
@@ -626,8 +668,6 @@ function main(config) {
     if (!hit) return list
     return [hit, ...list.filter((name) => name !== hit)]
   }
-
-  const sgFirstKeys = new Set(['ai_cursor', 'ai_gemini', 'ai_openai', 'ai_claude', 'ai_grok', 'ai_other'])
 
   if (otherProxies.length > 0) {
     generatedRegionGroups.push({
@@ -640,6 +680,13 @@ function main(config) {
   }
 
   // 3.3 构建功能策略组
+  const finalRules = [...rules]
+  const finalRuleProviders = Object.fromEntries(
+    Object.entries(ruleProviders).map(([key, p]) => [
+      key,
+      { ...p, url: applyGithubProxy(p.url) },
+    ])
+  )
   const functionalGroups = []
 
   functionalGroups.push({
@@ -652,22 +699,22 @@ function main(config) {
 
   serviceConfigs.forEach((svc) => {
     if (ruleOptions[svc.key]) {
-      rules.push(...svc.rules)
+      finalRules.push(...svc.rules)
 
       if (Array.isArray(svc.providers)) {
         svc.providers.forEach((p) => {
-          ruleProviders[p.key] = {
+          finalRuleProviders[p.key] = {
             ...ruleProviderCommon,
             behavior: p.behavior,
             format: p.format,
-            url: p.url,
+            url: applyGithubProxy(p.url),
             path: p.path,
           }
         })
       }
 
       let groupProxies
-      const preferPrefix = svc.preferRegion || (sgFirstKeys.has(svc.key) ? 'SG' : '')
+      const preferPrefix = svc.preferRegion || ''
       if (svc.reject) {
         groupProxies = [${jsStr(names.reject)}, ${jsStr(names.direct)}, ${jsStr(names.default)}]
       } else if (svc.directFirst || svc.key === 'biliintl' || svc.key === 'bahamut') {
@@ -691,7 +738,7 @@ function main(config) {
   })
 
   // 3.4 添加通用兜底策略组
-  rules.push(
+  finalRules.push(
 ${fallbackRulesLines}
   )
 
@@ -726,11 +773,11 @@ ${fallbackRulesLines}
   // 3.5 组装最终结果
   config['proxy-groups'] = [
     ...functionalGroups,
-    ...generatedRegionGroups.sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' })),
+    ...generatedRegionGroups,
   ]
 
-  config['rules'] = rules
-  config['rule-providers'] = ruleProviders
+  config['rules'] = finalRules
+  config['rule-providers'] = finalRuleProviders
 
   return config
 }
@@ -746,6 +793,10 @@ ${fallbackRulesLines}
       .map((l) => l.trim())
       .filter((l) => l && !l.startsWith('#'))
 
+    const hasYamlProxyLines = lines.some((l) =>
+      /^proxies\s*:$|^-\s*name\s*:|\{[^}]*(?:^|[\s{,])name\s*:/i.test(l)
+    )
+
     const proxies = []
     const seen = new Set()
 
@@ -754,14 +805,19 @@ ${fallbackRulesLines}
       let type = 'ss'
 
       // 匹配 Clash YAML 行内对象格式: - { name: "xxx", type: vmess, ... }
-      const inlineName = line.match(/name\s*:\s*(['"]?)(.+?)\1(?:\s*,|\s*\})/)
+      const inlineName =
+        line.includes('{') && line.includes('}')
+          ? line.match(/(?:^|[\s{,])name\s*:\s*(?:"([^"]+)"|'([^']+)'|([^,}]+))/)
+          : null
       if (inlineName) {
-        name = inlineName[2].trim()
-        const inlineType = line.match(/type\s*:\s*(['"]?)([a-zA-Z0-9_-]+)\1/)
+        name = (inlineName[1] || inlineName[2] || inlineName[3] || '').trim()
+        const inlineType = line.match(/(?:^|[\s{,])type\s*:\s*(['"]?)([a-zA-Z0-9_-]+)\1/)
         if (inlineType) type = inlineType[2]
-      } else if (/^-\s*name\s*:\s*/.test(line)) {
-        name = line.replace(/^-\s*name\s*:\s*/, '').replace(/^['"]|['"]$/g, '').trim()
-      } else if (/^(proxies:|type:|server:|port:|uuid:|password:|cipher:|udp:|tls:|ws-opts:)/i.test(line)) {
+      } else if (/^-\s*name\s*:\s*/i.test(line)) {
+        name = line.replace(/^-\s*name\s*:\s*/i, '').replace(/^['"]|['"]$/g, '').trim()
+      } else if (hasYamlProxyLines && /^name\s*:\s*/i.test(line)) {
+        name = line.replace(/^name\s*:\s*/i, '').replace(/^['"]|['"]$/g, '').trim()
+      } else if (hasYamlProxyLines) {
         continue
       } else {
         name = line.replace(/^-\s*/, '').trim()
@@ -813,7 +869,9 @@ ${fallbackRulesLines}
 
     for (const p of proxies) {
       const m = multRe.exec(p.name)
-      const ratio = m ? parseFloat(m[1]) : null
+      const ratioStr = m ? (m[1] ?? m[2]) : null
+      const parsedRatio = ratioStr !== null && ratioStr !== undefined ? parseFloat(ratioStr) : null
+      const ratio = parsedRatio !== null && Number.isFinite(parsedRatio) ? parsedRatio : null
       if (exclude && ratio !== null && ratio > limit) {
         excluded.push({ name: p.name, ratio })
         continue
@@ -875,18 +933,26 @@ ${fallbackRulesLines}
    */
   function yamlScalar(val) {
     if (val === null || val === undefined) return 'null'
-    if (typeof val === 'boolean' || typeof val === 'number') return String(val)
+    if (typeof val === 'boolean') return String(val)
+    if (typeof val === 'number') return Number.isFinite(val) ? String(val) : 'null'
     const s = String(val)
     if (
       s === '' ||
       /^(true|false|null|~|yes|no|on|off)$/i.test(s) ||
       /^[-+]?(\d+(\.\d*)?|\.\d+)$/.test(s) ||
-      /[:#\[\]{},&*!?|>'"%@`\n\r]/.test(s) ||
+      /^[-?](?:\s|$)/.test(s) ||
+      /[:#\[\]{},&*!?|>'"%@`\n\r\t\\]/.test(s) ||
       /^\s|\s$/.test(s)
     ) {
       return JSON.stringify(s)
     }
     return s
+  }
+
+  function isNonEmptyYamlCollection(v) {
+    if (v === null || typeof v !== 'object') return false
+    if (Array.isArray(v)) return v.length > 0
+    return Object.entries(v).some(([, item]) => item !== undefined)
   }
 
   function toYaml(value, level = 0) {
@@ -907,7 +973,7 @@ ${fallbackRulesLines}
             if (entries.length === 0) return `${pad}- {}`
             const [firstKey, firstVal] = entries[0]
             let firstLine
-            if (firstVal !== null && typeof firstVal === 'object' && Object.keys(firstVal).length > 0) {
+            if (isNonEmptyYamlCollection(firstVal)) {
               firstLine = `${pad}- ${yamlScalar(firstKey)}:\n${toYaml(firstVal, level + 2)}`
             } else {
               firstLine = `${pad}- ${yamlScalar(firstKey)}: ${toYaml(firstVal, level + 2)}`
@@ -915,7 +981,7 @@ ${fallbackRulesLines}
             const rest = entries
               .slice(1)
               .map(([k, v]) => {
-                if (v !== null && typeof v === 'object' && Object.keys(v).length > 0) {
+                if (isNonEmptyYamlCollection(v)) {
                   return `${pad}  ${yamlScalar(k)}:\n${toYaml(v, level + 2)}`
                 }
                 return `${pad}  ${yamlScalar(k)}: ${toYaml(v, level + 2)}`
@@ -932,7 +998,7 @@ ${fallbackRulesLines}
     if (entries.length === 0) return '{}'
     return entries
       .map(([k, v]) => {
-        if (v !== null && typeof v === 'object' && Object.keys(v).length > 0) {
+        if (isNonEmptyYamlCollection(v)) {
           return `${pad}${yamlScalar(k)}:\n${toYaml(v, level + 1)}`
         }
         return `${pad}${yamlScalar(k)}: ${toYaml(v, level + 1)}`
@@ -959,7 +1025,7 @@ ${fallbackRulesLines}
     // 作为 global_script.js 提取关键变量
     try {
       const extractor = new Function(
-        `"use strict";\n${jsText}\nreturn {\n  defaultArgs: typeof defaultArgs !== 'undefined' ? defaultArgs : null,\n  ruleOptions: typeof ruleOptions !== 'undefined' ? ruleOptions : null,\n  rules: typeof rules !== 'undefined' ? rules : null,\n  allRegionDefinitions: typeof allRegionDefinitions !== 'undefined' ? allRegionDefinitions : null,\n  serviceConfigs: typeof serviceConfigs !== 'undefined' ? serviceConfigs : null,\n  dnsConfig: typeof dnsConfig !== 'undefined' ? dnsConfig : null,\n  ruleProviderCommon: typeof ruleProviderCommon !== 'undefined' ? ruleProviderCommon : null,\n  groupBaseOption: typeof groupBaseOption !== 'undefined' ? groupBaseOption : null,\n  ruleProviders: typeof ruleProviders !== 'undefined' ? ruleProviders : null,\n  multiplierRegex: typeof multiplierRegex !== 'undefined' ? multiplierRegex : null,\n};`
+        `"use strict";\n${jsText}\nreturn {\n  defaultArgs: typeof defaultArgs !== 'undefined' ? defaultArgs : null,\n  ruleOptions: typeof ruleOptions !== 'undefined' ? ruleOptions : null,\n  rules: typeof rules !== 'undefined' ? rules : null,\n  allRegionDefinitions: typeof allRegionDefinitions !== 'undefined' ? allRegionDefinitions : null,\n  serviceConfigs: typeof serviceConfigs !== 'undefined' ? serviceConfigs : null,\n  dnsConfig: typeof dnsConfig !== 'undefined' ? dnsConfig : null,\n  chinaDNS: typeof chinaDNS !== 'undefined' ? chinaDNS : null,\n  foreignDNS: typeof foreignDNS !== 'undefined' ? foreignDNS : null,\n  directDNS: typeof directDNS !== 'undefined' ? directDNS : null,\n  defaultDNS: typeof defaultDNS !== 'undefined' ? defaultDNS : null,\n  ruleProviderCommon: typeof ruleProviderCommon !== 'undefined' ? ruleProviderCommon : null,\n  groupBaseOption: typeof groupBaseOption !== 'undefined' ? groupBaseOption : null,\n  ruleProviders: typeof ruleProviders !== 'undefined' ? ruleProviders : null,\n  multiplierRegex: typeof multiplierRegex !== 'undefined' ? multiplierRegex : null,\n};`
       )
       const data = extractor()
 
@@ -1027,6 +1093,24 @@ ${fallbackRulesLines}
         if (Array.isArray(data.dnsConfig['fake-ip-filter'])) {
           base.dnsExtra.fakeIpFilter = [...data.dnsConfig['fake-ip-filter']]
         }
+        if (data.dnsConfig['nameserver-policy'] && typeof data.dnsConfig['nameserver-policy'] === 'object') {
+          const sameArr = (a, b) =>
+            Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i])
+          base.dnsExtra.nameserverPolicy = Object.entries(data.dnsConfig['nameserver-policy']).map(([match, val]) => {
+            let target
+            if (val === data.chinaDNS) target = '$chinaDNS'
+            else if (val === data.foreignDNS) target = '$foreignDNS'
+            else if (val === data.directDNS) target = '$directDNS'
+            else if (val === data.defaultDNS) target = '$defaultDNS'
+            else if (sameArr(val, data.chinaDNS)) target = '$chinaDNS'
+            else if (sameArr(val, data.foreignDNS)) target = '$foreignDNS'
+            else if (sameArr(val, data.directDNS)) target = '$directDNS'
+            else if (sameArr(val, data.defaultDNS)) target = '$defaultDNS'
+            else if (Array.isArray(val)) target = val.join(';')
+            else target = String(val ?? '')
+            return { match, target }
+          })
+        }
       }
 
       if (data.ruleProviderCommon) {
@@ -1047,15 +1131,13 @@ ${fallbackRulesLines}
 
       if (data.ruleProviders && typeof data.ruleProviders === 'object') {
         const entries = Object.entries(data.ruleProviders)
-        if (entries.length > 0) {
-          base.builtinProviders = entries.map(([key, p]) => ({
-            key,
-            behavior: p.behavior || 'classical',
-            format: p.format || 'text',
-            url: p.url || '',
-            path: p.path || '',
-          }))
-        }
+        base.builtinProviders = entries.map(([key, p]) => ({
+          key,
+          behavior: p.behavior || 'classical',
+          format: p.format || 'text',
+          url: p.url || '',
+          path: p.path || '',
+        }))
       }
 
       if (data.multiplierRegex instanceof RegExp) {
@@ -1069,11 +1151,337 @@ ${fallbackRulesLines}
     }
   }
 
+  /**
+   * 静态诊断配置合法性（死引用、未定义 RULE-SET、重名策略组、规则抢占顺序等）
+   */
+  function diagnoseConfig(state, previewResult) {
+    const diagnostics = []
+    if (!state) return diagnostics
+
+    // 1. 正则语法检查
+    if (previewResult?.analysis?.multiplierValid === false) {
+      diagnostics.push({
+        level: 'error',
+        code: 'invalid-multiplier-regex',
+        message: '倍率识别正则语法错误，高倍率节点过滤将不生效。',
+      })
+    }
+    const regionCounts = previewResult?.analysis?.regionCounts || {}
+    for (const r of state.regions || []) {
+      if (regionCounts[r.name]?.valid === false) {
+        diagnostics.push({
+          level: 'error',
+          code: 'invalid-region-regex',
+          message: `地区分组「${r.name}」的正则表达式语法错误。`,
+        })
+      }
+    }
+
+    // 2. 服务组 key 检查
+    const keyCounts = new Map()
+    for (const svc of state.services || []) {
+      const k = String(svc.key || '').trim()
+      if (!k) {
+        diagnostics.push({
+          level: 'error',
+          code: 'empty-service-key',
+          message: `服务组「${svc.name || '未命名'}」的 key 不能为空。`,
+        })
+      } else {
+        keyCounts.set(k, (keyCounts.get(k) || 0) + 1)
+      }
+    }
+    for (const [k, count] of keyCounts.entries()) {
+      if (count > 1) {
+        diagnostics.push({
+          level: 'error',
+          code: 'duplicate-service-key',
+          message: `存在 ${count} 个服务组共用相同的 key「${k}」，开关状态会互相覆盖。`,
+        })
+      }
+    }
+
+    // 3. 服务顺序抢占检查
+    const enabledServices = (state.services || []).filter((s) => s.enabled)
+    const posOf = (key) => enabledServices.findIndex((s) => s.key === key)
+    const googlePos = posOf('google')
+    if (googlePos >= 0) {
+      for (const [k, label] of [
+        ['youtube', 'YouTube'],
+        ['ai_gemini', 'Gemini'],
+      ]) {
+        const p = posOf(k)
+        if (p > googlePos) {
+          diagnostics.push({
+            level: 'warn',
+            code: 'shadow-google',
+            message: `「谷歌服务」排在「${label}」之前，GEOSITE,google 可能会提前抢占「${label}」的流量。`,
+          })
+        }
+      }
+    }
+    const aiOtherPos = posOf('ai_other')
+    if (aiOtherPos >= 0) {
+      for (const k of ['ai_openai', 'ai_claude', 'ai_gemini', 'ai_cursor', 'ai_grok', 'ai_copilot']) {
+        const p = posOf(k)
+        if (p > aiOtherPos) {
+          diagnostics.push({
+            level: 'warn',
+            code: 'shadow-ai-other',
+            message: `「其他国外AI」排在「${enabledServices[p].name}」之前，兜底规则可能抢占细分 AI 流量。`,
+          })
+        }
+      }
+    }
+    const copilotPos = posOf('ai_copilot')
+    if (copilotPos >= 0) {
+      for (const [k, label] of [
+        ['github', 'Github'],
+        ['microsoft', '微软服务'],
+      ]) {
+        const p = posOf(k)
+        if (p >= 0 && p < copilotPos) {
+          diagnostics.push({
+            level: 'warn',
+            code: 'shadow-copilot',
+            message: `「${label}」排在「Copilot」之前，可能抢占 Copilot 相关域名。`,
+          })
+        }
+      }
+    }
+
+    // 4. 运行产物校验（重名组、死引用、未定义 rule-provider、MATCH 之后不可达规则）
+    if (previewResult && previewResult.ok && previewResult.config && state.args?.enable !== false) {
+      const cfg = previewResult.config
+      const groups = cfg['proxy-groups'] || []
+      const proxies = cfg.proxies || []
+      const providers = cfg['rule-providers'] || {}
+      const rules = cfg.rules || []
+
+      const groupNameCounts = new Map()
+      for (const g of groups) {
+        groupNameCounts.set(g.name, (groupNameCounts.get(g.name) || 0) + 1)
+      }
+      for (const [name, count] of groupNameCounts.entries()) {
+        if (count > 1) {
+          diagnostics.push({
+            level: 'error',
+            code: 'duplicate-group-name',
+            message: `生成了 ${count} 个重名策略组「${name}」，Mihomo 加载配置时会报错。`,
+          })
+        }
+      }
+
+      const validTargets = new Set([
+        'DIRECT',
+        'REJECT',
+        'REJECT-DROP',
+        'PASS',
+        'COMPATIBLE',
+        ...groups.map((g) => g.name),
+        ...proxies.map((p) => p.name),
+      ])
+      const deadTargets = new Set()
+      const deadGroupRefs = new Set()
+      const missingProviders = new Set()
+      let matchSeenAt = -1
+
+      for (const g of groups) {
+        for (const pName of g.proxies || []) {
+          if (pName && !validTargets.has(pName)) {
+            deadGroupRefs.add(`${g.name} → ${pName}`)
+          }
+        }
+      }
+
+      rules.forEach((raw, idx) => {
+        const parts = String(raw || '').split(',').map((s) => s.trim())
+        const type = (parts[0] || '').toUpperCase()
+        if (matchSeenAt >= 0 && idx > matchSeenAt) {
+          // Reported once below
+        } else if (type === 'MATCH') {
+          matchSeenAt = idx
+        }
+
+        const target = type === 'MATCH' ? parts[1] : parts[2]
+        if (target && !validTargets.has(target)) {
+          deadTargets.add(target)
+        }
+        if (type === 'RULE-SET' && parts[1] && !Object.prototype.hasOwnProperty.call(providers, parts[1])) {
+          missingProviders.add(parts[1])
+        }
+      })
+
+      for (const ref of deadGroupRefs) {
+        diagnostics.push({
+          level: 'error',
+          code: 'dead-group-proxy',
+          message: `策略组引用了不存在的候选代理/分组「${ref}」。`,
+        })
+      }
+
+      for (const target of deadTargets) {
+        diagnostics.push({
+          level: 'error',
+          code: 'dead-rule-target',
+          message: `存在规则指向未定义的策略组/节点「${target}」（请检查是否改名或关闭了对应服务组）。`,
+        })
+      }
+      for (const prov of missingProviders) {
+        diagnostics.push({
+          level: 'error',
+          code: 'missing-rule-provider',
+          message: `规则引用了未定义的 RULE-SET「${prov}」。`,
+        })
+      }
+      if (matchSeenAt >= 0 && matchSeenAt < rules.length - 1) {
+        diagnostics.push({
+          level: 'warn',
+          code: 'rules-after-match',
+          message: `第 #${matchSeenAt + 1} 条 MATCH 兜底规则之后还有 ${rules.length - 1 - matchSeenAt} 条规则，它们永远不会被命中。`,
+        })
+      }
+    }
+
+    return diagnostics
+  }
+
+  /**
+   * 模拟域名/端口的分流规则命中与最终路由链
+   */
+  function parseMatchQuery(rawQuery) {
+    const trimmed = String(rawQuery || '').trim()
+    if (!trimmed) return null
+
+    // 纯端口号或 port:22
+    const portOnly = trimmed.match(/^(?:port\s*[:=]\s*)?(\d{1,5})$/i)
+    if (portOnly) {
+      const port = Number(portOnly[1])
+      if (port >= 1 && port <= 65535) {
+        return { raw: trimmed, host: '', port }
+      }
+    }
+
+    let cleaned = trimmed
+    let port = null
+    if (/^https?:\/\//i.test(cleaned)) {
+      const scheme = cleaned.toLowerCase().startsWith('https://') ? 'https' : 'http'
+      cleaned = cleaned.replace(/^https?:\/\//i, '').split(/[/?#]/)[0]
+      port = scheme === 'https' ? 443 : 80
+    } else {
+      cleaned = cleaned.split(/[/?#]/)[0]
+    }
+
+    const hostPort = cleaned.match(/^([^:\s]+):(\d{1,5})$/)
+    if (hostPort) {
+      const p = Number(hostPort[2])
+      return {
+        raw: trimmed,
+        host: hostPort[1].toLowerCase().replace(/\.$/, ''),
+        port: p >= 1 && p <= 65535 ? p : port,
+      }
+    }
+
+    return {
+      raw: trimmed,
+      host: cleaned.toLowerCase().replace(/\.$/, ''),
+      port,
+    }
+  }
+
+  function matchPortRule(port, payload) {
+    if (port === null || port === undefined) return false
+    const segments = String(payload || '').split('/')
+    for (const seg of segments) {
+      const s = seg.trim()
+      if (!s) continue
+      const range = s.match(/^(\d+)-(\d+)$/)
+      if (range) {
+        const lo = Number(range[1])
+        const hi = Number(range[2])
+        if (port >= lo && port <= hi) return true
+      } else if (/^\d+$/.test(s) && port === Number(s)) {
+        return true
+      }
+    }
+    return false
+  }
+
+  function simulateRuleMatch(rawQuery, config, simulatedSelections) {
+    const parsed = parseMatchQuery(rawQuery)
+    if (!parsed || !config) return null
+
+    const rules = config.rules || []
+    const groupsByName = new Map((config['proxy-groups'] || []).map((g) => [g.name, g]))
+    const selections = simulatedSelections || {}
+    const passedDynamic = []
+    let matched = null
+
+    for (let i = 0; i < rules.length; i++) {
+      const raw = String(rules[i] || '')
+      const parts = raw.split(',').map((s) => s.trim())
+      const type = (parts[0] || '').toUpperCase()
+      const payload = type === 'MATCH' ? '*' : parts[1] || ''
+      const target = type === 'MATCH' ? parts[1] || '' : parts[2] || ''
+
+      if (type === 'DOMAIN' && parsed.host && parsed.host === payload.toLowerCase()) {
+        matched = { idx: i + 1, raw, type, payload, target }
+        break
+      }
+      if (type === 'DOMAIN-SUFFIX' && parsed.host) {
+        const suf = payload.toLowerCase().replace(/^\./, '')
+        if (parsed.host === suf || parsed.host.endsWith('.' + suf)) {
+          matched = { idx: i + 1, raw, type, payload, target }
+          break
+        }
+      }
+      if (type === 'DOMAIN-KEYWORD' && parsed.host && payload && parsed.host.includes(payload.toLowerCase())) {
+        matched = { idx: i + 1, raw, type, payload, target }
+        break
+      }
+      if (type === 'DST-PORT' && matchPortRule(parsed.port, payload)) {
+        matched = { idx: i + 1, raw, type, payload, target }
+        break
+      }
+      if (type === 'MATCH') {
+        matched = { idx: i + 1, raw, type, payload: '*', target }
+        break
+      }
+      if (type === 'GEOSITE' || type === 'GEOIP' || type === 'RULE-SET') {
+        passedDynamic.push({ idx: i + 1, raw, type, payload, target })
+      }
+    }
+
+    const chain = []
+    if (matched && matched.target) {
+      const visited = new Set()
+      let cur = matched.target
+      while (cur && !visited.has(cur)) {
+        visited.add(cur)
+        chain.push(cur)
+        const group = groupsByName.get(cur)
+        if (!group || !Array.isArray(group.proxies) || group.proxies.length === 0) break
+        cur = selections[cur] && group.proxies.includes(selections[cur]) ? selections[cur] : group.proxies[0]
+      }
+    }
+
+    return {
+      query: parsed.raw,
+      host: parsed.host,
+      port: parsed.port,
+      matched,
+      passedDynamic,
+      chain,
+    }
+  }
+
   global.YaNetGenerator = {
     generateGlobalScript,
     parseSampleNodes,
     analyzeNodes,
     executeScriptPreview,
+    diagnoseConfig,
+    simulateRuleMatch,
     toYaml,
     parseExistingScript,
   }

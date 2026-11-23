@@ -3,7 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Clash Verge 分流规则工作台</title>
+    <title>Clash Verge Rule Studio — 面向开发者的分流规则工作台</title>
+    <meta
+      name="description"
+      content="纯静态、零依赖的 Clash Verge Rev / Mihomo 全局扩展脚本（global_script.js）可视化分流规则工作台，内置海外 AI 细分、开发精简预设、规则静态诊断与域名命中模拟。"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Clash Verge Rule Studio — 面向开发者的分流规则工作台" />
+    <meta
+      property="og:description"
+      content="纯静态、零依赖的 Clash Verge Rev / Mihomo 可视化分流规则编辑器，支持真实运行 main(config) 预览、静态校验、域名命中模拟与一键链接分享。"
+    />
+    <meta name="theme-color" content="#1976d2" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -14,7 +25,7 @@
           <img src="./favicon.svg" alt="" width="30" height="30" />
         </div>
         <div>
-          <div class="brand-title">Clash Verge 分流规则工作台</div>
+          <div class="brand-title">Clash Verge Rule Studio</div>
         </div>
         <div id="run-status" class="topbar-status">
           <span class="dot"></span>
@@ -23,11 +34,28 @@
       </div>
 
       <div class="topbar-actions">
-        <button id="btn-import" class="btn" title="导入已有的 global_script.js 或 JSON 配置">导入脚本</button>
+        <button id="btn-undo" class="btn" title="撤销上一步结构修改 (Ctrl/Cmd+Z)" disabled>撤销</button>
+        <button id="btn-import" class="btn" title="导入已有的 global_script.js 或 JSON 配置">导入</button>
+        <button id="btn-share-url" class="btn" title="将当前配置压缩为分享链接并复制">分享链接</button>
         <button id="btn-export-json" class="btn" title="备份当前编辑器配置为 JSON">备份 JSON</button>
-        <button id="btn-reset" class="btn" title="恢复为默认分流规则配置">重置默认</button>
+        <button id="btn-reset" class="btn" title="恢复为默认分流规则配置">重置</button>
         <button id="btn-copy-js" class="btn">复制 JS</button>
         <button id="btn-download-js" class="btn btn-primary">下载 global_script.js</button>
+        <button id="btn-theme" class="icon-btn topbar-icon-btn" title="切换亮色/暗色主题" aria-label="切换亮色/暗色主题"></button>
+        <a
+          class="icon-btn topbar-icon-btn"
+          href="https://github.com/yibiner/clash-verge-rule-studio"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="查看 GitHub 仓库"
+          aria-label="查看 GitHub 仓库"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path
+              d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"
+            />
+          </svg>
+        </a>
       </div>
     </header>
 
@@ -35,9 +63,14 @@
       <aside class="sidebar">
         <nav class="nav-list" id="nav-list" aria-label="配置模块"></nav>
         <div class="sidebar-footer">
-          <div class="sidebar-meta">
-            纯本地零依赖运行，修改自动保存在浏览器中。右侧预览通过真实执行 <code>main(config)</code> 生成。
-          </div>
+          <button id="btn-about" class="sidebar-about-btn" type="button" title="查看本地运行说明与开源声明">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="16" x2="12" y2="12" />
+              <line x1="12" y1="8" x2="12.01" y2="8" />
+            </svg>
+            <span>纯本地运行 · 关于</span>
+          </button>
         </div>
       </aside>
 
@@ -100,6 +133,34 @@
         <div class="modal-foot">
           <button id="import-cancel" class="btn">取消</button>
           <button id="import-confirm" class="btn btn-primary">解析并导入</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- About Modal -->
+    <div id="about-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="about-modal-title">
+      <div class="modal modal-sm">
+        <div class="modal-head">
+          <h3 id="about-modal-title" class="modal-title">关于 Clash Verge Rule Studio</h3>
+          <button id="about-modal-close" class="icon-btn" aria-label="关闭">✕</button>
+        </div>
+        <div class="modal-body">
+          <ul class="about-list">
+            <li><strong>纯本地运行</strong>：零后端依赖，修改自动存本地 <code>localStorage</code>。</li>
+            <li><strong>真实执行预览</strong>：右侧结果由浏览器直接执行 <code>main(config)</code> 生成。</li>
+            <li><strong>开源声明</strong>：MIT 独立社区工具，与 Clash Verge Rev / Mihomo 官方无隶属关系。</li>
+          </ul>
+        </div>
+        <div class="modal-foot">
+          <a
+            class="btn"
+            href="https://github.com/yibiner/clash-verge-rule-studio"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            GitHub 仓库
+          </a>
+          <button id="about-modal-ok" class="btn btn-primary">知道了</button>
         </div>
       </div>
     </div>

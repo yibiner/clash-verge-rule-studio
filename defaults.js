@@ -23,6 +23,7 @@
     { name: 'Hulu', category: '流媒体', url: QURE_BASE + 'Hulu.png' },
     { name: 'Emby', category: '流媒体', url: QURE_BASE + 'Emby.png' },
     { name: 'Telegram', category: '社交', url: QURE_BASE + 'Telegram.png' },
+    { name: 'WhatsApp', category: '社交', url: QURE_BASE + 'WhatsApp.png' },
     { name: 'Line', category: '社交', url: QURE_BASE + 'Line.png' },
     { name: 'Discord', category: '社交', url: QURE_BASE + 'Discord.png' },
     { name: 'Twitter / X', category: '社交', url: QURE_BASE + 'Twitter.png' },
@@ -169,7 +170,8 @@
         interfaceName: '',
         excludeHighPercentage: true,
         globalRatioLimit: 2,
-        multiplierRegex: '(?<=[xX✕✖⨉倍率])([1-9]+(\\.\\d+)*|0{1}\\.\\d+)(?=[xX✕✖⨉倍率])*',
+        multiplierRegex:
+          '(?<![a-zA-Z0-9.])(?:(?:[xX×✕✖⨉]|倍率[:：]?)\\s*([1-9]\\d*(?:\\.\\d+)?|0(?:\\.\\d+)?)|([1-9]\\d*(?:\\.\\d+)?|0(?:\\.\\d+)?)(?:[xX×✕✖⨉](?![a-zA-Z])|\\s*倍))',
         multiplierFlags: 'i',
         skipIps:
           '10.0.0.0/8;100.64.0.0/10;127.0.0.0/8;169.254.0.0/16;172.16.0.0/12;192.168.0.0/16;198.18.0.0/16;FC00::/7;FE80::/10;::1/128',
@@ -188,7 +190,7 @@
         allowLan: true,
         bindAddress: '*',
         externalController: '127.0.0.1:9090',
-        secret: 'YaNet',
+        secret: '',
         port: 7890,
         socksPort: 7891,
         mixedPort: 7892,
@@ -249,6 +251,9 @@
         enable: true,
         writeToSystem: false,
         server: 'cn.ntp.org.cn',
+      },
+      exportOptions: {
+        includeVergeManaged: false,
       },
       dnsExtra: {
         listen: '0.0.0.0:1053',
@@ -579,7 +584,7 @@
           name: 'Pixiv',
           enabled: true,
           icon: 'https://play-lh.googleusercontent.com/8pFuLOHF62ADcN0ISUAyEueA5G8IF49mX_6Az6pQNtokNVHxIVbS1L2NM62H-k02rLM=w240-h480-rw',
-          url: 'http://spclient.wg.spotify.com/signup/public/v1/account',
+          url: 'https://www.pixiv.net/',
           reject: false,
           directFirst: false,
           rules: ['GEOSITE,pixiv,Pixiv'],
@@ -626,14 +631,14 @@
           url: 'https://www.telegram.org/img/website_icon.svg',
           reject: false,
           directFirst: false,
-          rules: ['GEOIP,telegram,Telegram'],
+          rules: ['GEOSITE,telegram,Telegram', 'GEOIP,telegram,Telegram,no-resolve'],
           providers: [],
         },
         {
           key: 'whatsapp',
           name: 'WhatsApp',
           enabled: true,
-          icon: 'https://static.whatsapp.net/rsrc.php/v3/yP/r/rYZqPCBaG70.png',
+          icon: QURE_BASE + 'WhatsApp.png',
           url: 'https://web.whatsapp.com/data/manifest.json',
           reject: false,
           directFirst: false,
@@ -760,6 +765,7 @@
       tun: { ...def.tun, ...(parsed.tun || {}) },
       snifferConfig: { ...def.snifferConfig, ...(parsed.snifferConfig || {}) },
       ntp: { ...def.ntp, ...(parsed.ntp || {}) },
+      exportOptions: { ...def.exportOptions, ...(parsed.exportOptions || {}) },
       dnsExtra: { ...def.dnsExtra, ...(parsed.dnsExtra || {}) },
       builtinProxies: { ...def.builtinProxies, ...(parsed.builtinProxies || {}) },
       builtinProviders: Array.isArray(parsed.builtinProviders) ? parsed.builtinProviders : def.builtinProviders,
@@ -1007,10 +1013,11 @@
   const SG_FIRST_KEYS = ['ai_cursor', 'ai_gemini', 'ai_openai', 'ai_claude', 'ai_grok', 'ai_other']
 
   function applyDevLeanPreset(state) {
-    const hasSplit = state.services.some((s) => FOREIGN_AI_SPLIT_KEYS.includes(s.key))
-    if (!hasSplit) {
-      state.services = state.services.filter((s) => s.key !== 'openai')
-      state.services.unshift(...createForeignAiSplitPreset())
+    state.services = state.services.filter((s) => s.key !== 'openai')
+    const existingKeys = new Set(state.services.map((s) => s.key))
+    const missingAi = createForeignAiSplitPreset().filter((s) => !existingKeys.has(s.key))
+    if (missingAi.length > 0) {
+      state.services.unshift(...missingAi)
     }
 
     const enabled = new Set(DEV_LEAN_ENABLED)

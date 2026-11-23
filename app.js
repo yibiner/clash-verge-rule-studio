@@ -2,17 +2,27 @@
   'use strict'
 
   const STORAGE_KEY = 'yanet_global_script_editor_state_v1'
+  const THEME_KEY = 'clash_verge_rule_studio_theme_v1'
+  const MAX_UNDO = 20
   const {
     QURE_ICONS,
     DNS_MODES,
     FOREIGN_AI_SPLIT_KEYS,
+    SAMPLE_NODES_TEXT,
     createDefaultState,
     mergeStateWithDefaults,
     createForeignAiSplitPreset,
     createMergedForeignAiService,
     applyDevLeanPreset,
   } = window.YaNetDefaults
-  const { generateGlobalScript, executeScriptPreview, toYaml, parseExistingScript } = window.YaNetGenerator
+  const {
+    generateGlobalScript,
+    executeScriptPreview,
+    diagnoseConfig,
+    simulateRuleMatch,
+    toYaml,
+    parseExistingScript,
+  } = window.YaNetGenerator
 
   // ===== UI State =====
   let state = loadState()
@@ -21,8 +31,10 @@
   let vergeMode = 'rule' // rule | global | direct
   let serviceSearch = ''
   let ruleSearch = ''
+  let ruleTestQuery = ''
   let groupSearch = ''
   let openServiceIdx = -1
+  let openServiceOriginalName = ''
   let openRegionIdx = -1
   let dragState = null
   let expandedPreviewGroups = new Set(['默认节点'])
@@ -32,6 +44,8 @@
   let iconPickerQuery = ''
   let lastScriptCode = ''
   let lastPreviewResult = null
+  let lastDiagnostics = []
+  let undoStack = []
   let toastTimer = null
 
   // ===== DOM Refs =====
@@ -43,6 +57,9 @@
   const elRunStatus = document.getElementById('run-status')
   const elRunStatusText = document.getElementById('run-status-text')
   const elToast = document.getElementById('toast')
+  const elBtnUndo = document.getElementById('btn-undo')
+  const elBtnTheme = document.getElementById('btn-theme')
+  const elBtnShareUrl = document.getElementById('btn-share-url')
 
   // Modals
   const elIconModal = document.getElementById('icon-modal')
@@ -52,6 +69,8 @@
   const elImportModal = document.getElementById('import-modal')
   const elImportFile = document.getElementById('import-file-input')
   const elImportTextarea = document.getElementById('import-textarea')
+  const elAboutModal = document.getElementById('about-modal')
+  const elBtnAbout = document.getElementById('btn-about')
 
   // ===== Utilities =====
   function esc(str) {
@@ -143,18 +162,192 @@
     return `${28 + hash} ms`
   }
 
+  // ===== Theme (Light / Dark) =====
+  const SUN_SVG =
+    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>'
+  const MOON_SVG =
+    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>'
+
+  function getPreferredTheme() {
+    try {
+      const saved = localStorage.getItem(THEME_KEY)
+      if (saved === 'dark' || saved === 'light') return saved
+    } catch {
+      // ignore
+    }
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      return 'dark'
+    }
+    return 'light'
+  }
+
+  function applyTheme(theme) {
+    const isDark = theme === 'dark'
+    if (document.documentElement) {
+      document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light')
+    }
+    const metaTheme = typeof document.querySelector === 'function' ? document.querySelector('meta[name="theme-color"]') : null
+    if (metaTheme) {
+      metaTheme.setAttribute('content', isDark ? '#161d28' : '#1976d2')
+    }
+    if (elBtnTheme) {
+      elBtnTheme.innerHTML = isDark ? SUN_SVG : MOON_SVG
+      elBtnTheme.title = isDark ? '切换为亮色主题' : '切换为暗色主题'
+      elBtnTheme.setAttribute('aria-label', elBtnTheme.title)
+    }
+  }
+
+  function toggleTheme() {
+    const cur = document.documentElement?.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
+    const next = cur === 'dark' ? 'light' : 'dark'
+    try {
+      localStorage.setItem(THEME_KEY, next)
+    } catch {
+      // ignore
+    }
+    applyTheme(next)
+  }
+
+  // ===== Undo History =====
+  function updateUndoButton() {
+    if (!elBtnUndo) return
+    elBtnUndo.disabled = undoStack.length === 0
+    const last = undoStack[undoStack.length - 1]
+    elBtnUndo.title = last ? `撤销：${last.label} (Ctrl/Cmd+Z)` : '暂无可撤销操作 (Ctrl/Cmd+Z)'
+  }
+
+  function pushUndo(label) {
+    try {
+      undoStack.push({
+        label: label || '上一步修改',
+        snapshot: JSON.stringify(state),
+      })
+      if (undoStack.length > MAX_UNDO) undoStack.shift()
+      updateUndoButton()
+    } catch {
+      // ignore serialization failure
+    }
+  }
+
+  function performUndo() {
+    if (undoStack.length === 0) return
+    const entry = undoStack.pop()
+    updateUndoButton()
+    try {
+      state = mergeStateWithDefaults(JSON.parse(entry.snapshot))
+      openServiceIdx = -1
+      openServiceOriginalName = ''
+      openRegionIdx = -1
+      recomputePreview()
+      renderEditor()
+      showToast(`已撤销：${entry.label}`)
+    } catch {
+      showToast('撤销失败')
+    }
+  }
+
+  // ===== URL Hash Sharing (#cfg=...) =====
+  function bytesToBase64Url(bytes) {
+    let bin = ''
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  }
+
+  function base64UrlToBytes(str) {
+    const pad = str.length % 4 === 0 ? '' : '='.repeat(4 - (str.length % 4))
+    const b64 = str.replace(/-/g, '+').replace(/_/g, '/') + pad
+    const bin = atob(b64)
+    const out = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+    return out
+  }
+
+  async function encodeStateToSharePayload(currentState) {
+    const slim = { ...currentState }
+    if (slim.sampleNodesText === SAMPLE_NODES_TEXT) {
+      delete slim.sampleNodesText
+    }
+    const jsonBytes = new TextEncoder().encode(JSON.stringify(slim))
+    if (typeof CompressionStream === 'function' && typeof Blob === 'function') {
+      const stream = new Blob([jsonBytes]).stream().pipeThrough(new CompressionStream('deflate-raw'))
+      const compressed = new Uint8Array(await new Response(stream).arrayBuffer())
+      return 'z.' + bytesToBase64Url(compressed)
+    }
+    return 'j.' + bytesToBase64Url(jsonBytes)
+  }
+
+  function validateSharedState(parsed) {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('分享链接数据格式无效')
+    }
+    if (!parsed.args || !Array.isArray(parsed.services) || !Array.isArray(parsed.regions)) {
+      throw new Error('分享链接缺少必要配置字段')
+    }
+    return mergeStateWithDefaults(parsed)
+  }
+
+  async function decodeStateFromSharePayload(payload) {
+    if (payload.startsWith('z.')) {
+      if (typeof DecompressionStream !== 'function' || typeof Blob !== 'function') {
+        throw new Error('当前浏览器不支持解压此分享链接')
+      }
+      const bytes = base64UrlToBytes(payload.slice(2))
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
+      const text = await new Response(stream).text()
+      return validateSharedState(JSON.parse(text))
+    }
+    const raw = payload.startsWith('j.') ? payload.slice(2) : payload
+    const text = new TextDecoder().decode(base64UrlToBytes(raw))
+    return validateSharedState(JSON.parse(text))
+  }
+
+  async function loadStateFromUrlHash() {
+    const hash = typeof location !== 'undefined' ? location.hash || '' : ''
+    if (!hash.startsWith('#cfg=')) return
+    const payload = hash.slice(5).trim()
+    if (!payload) return
+    try {
+      const decoded = await decodeStateFromSharePayload(payload)
+      pushUndo('加载分享链接')
+      state = decoded
+      openServiceIdx = -1
+      openServiceOriginalName = ''
+      openRegionIdx = -1
+      recomputePreview()
+      renderEditor()
+      if (typeof history !== 'undefined' && typeof history.replaceState === 'function') {
+        history.replaceState(null, '', location.pathname + location.search)
+      }
+      showToast('已从分享链接加载配置')
+    } catch {
+      showToast('分享链接解析失败，已保留本地配置')
+    }
+  }
+
   // ===== Live Script Generation & Execution =====
   function recomputePreview() {
     saveState()
     lastScriptCode = generateGlobalScript(state)
     lastPreviewResult = executeScriptPreview(lastScriptCode, state.sampleNodesText, state)
+    lastDiagnostics = diagnoseConfig(state, lastPreviewResult)
+
+    const errorCount = lastDiagnostics.filter((d) => d.level === 'error').length
+    const warnCount = lastDiagnostics.filter((d) => d.level === 'warn').length
 
     if (lastPreviewResult.ok) {
-      elRunStatus.classList.remove('is-error')
+      elRunStatus.classList.toggle('is-error', errorCount > 0)
+      elRunStatus.classList.toggle('is-warn', errorCount === 0 && warnCount > 0)
       const groupsCount = (lastPreviewResult.config['proxy-groups'] || []).length
       const rulesCount = (lastPreviewResult.config.rules || []).length
-      elRunStatusText.textContent = `正常 · ${groupsCount} 策略组 / ${rulesCount} 规则`
+      const diagSuffix =
+        errorCount > 0
+          ? ` · ${errorCount} 异常`
+          : warnCount > 0
+            ? ` · ${warnCount} 提示`
+            : ''
+      elRunStatusText.textContent = `正常 · ${groupsCount} 策略组 / ${rulesCount} 规则${diagSuffix}`
     } else {
+      elRunStatus.classList.remove('is-warn')
       elRunStatus.classList.add('is-error')
       elRunStatusText.textContent = '执行异常'
     }
@@ -199,7 +392,7 @@
       id: 'core',
       label: '内核与 TUN',
       icon: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></svg>`,
-      badge: () => (state.tun.enable ? 'TUN' : '常规'),
+      badge: () => (!includeVergeManagedFields() ? 'Verge' : state.tun.enable ? 'TUN' : '常规'),
     },
     {
       id: 'nodes',
@@ -233,6 +426,15 @@
     else if (activeSection === 'dns') renderDnsSection()
     else if (activeSection === 'core') renderCoreSection()
     else if (activeSection === 'nodes') renderNodesSection()
+  }
+
+  function includeVergeManagedFields() {
+    return Boolean(state.exportOptions && state.exportOptions.includeVergeManaged)
+  }
+
+  function heldPill() {
+    if (includeVergeManagedFields()) return ''
+    return '<span class="pill pill-gray">不写入脚本</span>'
   }
 
   function renderGeneralSection() {
@@ -284,8 +486,8 @@
         </div>
         <div class="toggle-row">
           <div>
-            <div class="toggle-info-title">启用 IPv6 (ipv6)</div>
-            <div class="toggle-info-desc">仅在本地网络与机场节点均支持 IPv6 时建议开启。</div>
+            <div class="toggle-info-title">启用 IPv6 (ipv6) ${heldPill()}</div>
+            <div class="toggle-info-desc">${includeVergeManagedFields() ? '本地网络与节点均支持 IPv6 时再开启。' : '以 Clash Verge 设置页为准，默认不写入脚本。'}</div>
           </div>
           <label class="switch">
             <input type="checkbox" data-bind="args.ipv6" ${a.ipv6 ? 'checked' : ''} />
@@ -297,12 +499,12 @@
       <div class="section-card">
         <div class="section-card-head">
           <h3 class="section-card-title">高倍率节点过滤</h3>
-          <span class="pill ${excludedCount > 0 ? 'pill-amber' : 'pill-gray'}">当前模拟订阅已过滤 ${excludedCount} 个节点</span>
+          <span id="multiplier-excluded-pill" class="pill ${excludedCount > 0 ? 'pill-amber' : 'pill-gray'}">当前模拟订阅已过滤 ${excludedCount} 个节点</span>
         </div>
         <div class="toggle-row" style="margin-bottom: 12px">
           <div>
             <div class="toggle-info-title">过滤高倍率节点 (excludeHighPercentage)</div>
-            <div class="toggle-info-desc">自动识别节点名中的 <code>x2</code> / <code>×3</code> / <code>倍率5</code>，超过上限则不加入策略组。</div>
+            <div class="toggle-info-desc">识别 <code>x2</code> / <code>×3</code> / <code>1.5x</code> / <code>倍率5</code>，超上限节点不加入策略组。</div>
           </div>
           <label class="switch">
             <input type="checkbox" data-bind="args.excludeHighPercentage" ${a.excludeHighPercentage ? 'checked' : ''} />
@@ -325,7 +527,7 @@
           <div class="field span-2">
             <label>
               倍率识别正则 (multiplierRegex)
-              <span class="pill ${lastPreviewResult?.analysis?.multiplierValid === false ? 'pill-red' : 'pill-green'}">${lastPreviewResult?.analysis?.multiplierValid === false ? '正则语法错误' : '正则有效'}</span>
+              <span id="multiplier-regex-pill" class="pill ${lastPreviewResult?.analysis?.multiplierValid === false ? 'pill-red' : 'pill-green'}">${lastPreviewResult?.analysis?.multiplierValid === false ? '正则语法错误' : '正则有效'}</span>
             </label>
             <div class="input-row">
               <input class="input mono" data-bind="args.multiplierRegex" value="${esc(a.multiplierRegex)}" />
@@ -357,7 +559,7 @@
             <input class="input mono" data-bind="args.interfaceName" value="${esc(a.interfaceName)}" placeholder="留空自动检测（如 en0 / eth0）" />
           </div>
           <div class="field">
-            <label>外部控制密码 (secret)</label>
+            <label>外部控制密码 (secret) ${heldPill()}</label>
             <input class="input mono" data-bind="core.secret" value="${esc(c.secret)}" />
           </div>
         </div>
@@ -388,11 +590,47 @@
         ${keyFreq[trimmedKey] > 1 ? '<span class="pill pill-red">key 重复</span>' : ''}
         ${svc.reject ? '<span class="pill pill-red">默认拒绝</span>' : ''}
         ${svc.directFirst ? '<span class="pill pill-green">直连优先</span>' : ''}
+        ${!svc.reject && svc.preferRegion ? `<span class="pill pill-blue">优先 ${esc(svc.preferRegion)}</span>` : ''}
         <span class="pill pill-gray">${ruleCount} 条规则</span>
         ${provCount > 0 ? `<span class="pill pill-blue">${provCount} 规则集</span>` : ''}
       </div>
       <div class="entity-sub">key: ${esc(svc.key)} · ${esc((svc.rules || [])[0] || '无规则')}</div>
     `
+  }
+
+  function renderRegionPrefixOptions(selectedPrefix) {
+    const cur = String(selectedPrefix || '').trim()
+    const seen = new Set()
+    const options = ['<option value="">不指定（按地区顺序）</option>']
+    for (const r of state.regions || []) {
+      const prefix = String(r.name || '').substring(0, 2)
+      if (!prefix || seen.has(prefix)) continue
+      seen.add(prefix)
+      options.push(
+        `<option value="${esc(prefix)}" ${cur === prefix ? 'selected' : ''}>${esc(r.name)} (${esc(prefix)})</option>`
+      )
+    }
+    if (cur && !seen.has(cur)) {
+      options.push(`<option value="${esc(cur)}" selected>${esc(cur)}（自定义前缀）</option>`)
+    }
+    return options.join('')
+  }
+
+  function renderServiceRuleSyncSlot(svc, idx) {
+    const newName = String(svc.name || '').trim()
+    if (!openServiceOriginalName || !newName || newName === openServiceOriginalName) {
+      return '<span class="field-hint">修改策略组名后可一键同步下方规则目标</span>'
+    }
+    const oldEscaped = esc(openServiceOriginalName)
+    const hasOldRef = (svc.rules || []).some((line) => {
+      const parts = String(line || '').split(',').map((s) => s.trim())
+      const target = (parts[0] || '').toUpperCase() === 'MATCH' ? parts[1] : parts[2]
+      return target === openServiceOriginalName
+    })
+    if (!hasOldRef) {
+      return '<span class="field-hint">修改策略组名后可一键同步下方规则目标</span>'
+    }
+    return `<button type="button" class="btn btn-sm btn-primary" data-sync-svc-rules="${idx}">将规则中的「${oldEscaped}」同步为「${esc(newName)}」</button>`
   }
 
   function refreshServiceCardHeaders() {
@@ -433,7 +671,7 @@
     })
   }
 
-  function renderServicesSection() {
+  function renderServicesListMarkup() {
     const query = serviceSearch.trim().toLowerCase()
     const keyFreq = buildServiceKeyFreq()
     const filtered = state.services
@@ -447,6 +685,41 @@
         )
       })
 
+    if (filtered.length === 0) {
+      return '<div class="empty-state">无匹配的服务分流组</div>'
+    }
+
+    return filtered
+      .map(({ svc, idx }) => {
+        const isOpen = openServiceIdx === idx
+        return `
+          <div class="entity-card ${svc.enabled ? '' : 'is-disabled'} ${isOpen ? 'is-open' : ''}" data-drag-type="service" data-drag-idx="${idx}">
+            <div class="entity-head" draggable="true">
+              <span class="drag-handle" title="按住拖拽调整顺序" aria-hidden="true">${DRAG_GRIP_SVG}</span>
+              <div class="entity-head-main" data-toggle-svc-open="${idx}">
+                <div class="entity-icon">${renderIconThumb(svc.icon, svc.name)}</div>
+                <div class="entity-title-wrap">
+                  ${renderServiceTitleInner(svc, keyFreq)}
+                </div>
+              </div>
+              <div class="entity-actions">
+                <button class="icon-btn" data-move-svc="${idx}:-1" title="上移" ${idx === 0 ? 'disabled' : ''}>↑</button>
+                <button class="icon-btn" data-move-svc="${idx}:1" title="下移" ${idx === state.services.length - 1 ? 'disabled' : ''}>↓</button>
+                <button class="btn btn-sm btn-ghost" data-toggle-svc-open="${idx}" title="展开编辑">${isOpen ? '收起' : '编辑'}</button>
+                <label class="switch" title="启用/禁用该服务组">
+                  <input type="checkbox" data-svc-toggle="${idx}" ${svc.enabled ? 'checked' : ''} />
+                  <span class="switch-track"></span>
+                </label>
+              </div>
+            </div>
+            ${isOpen ? renderServiceEditBody(svc, idx) : ''}
+          </div>
+        `
+      })
+      .join('')
+  }
+
+  function renderServicesSection() {
     const splitKeySet = new Set(FOREIGN_AI_SPLIT_KEYS)
     const activeSplitCount = state.services.filter((s) => splitKeySet.has(s.key)).length
     const isAiSplit = activeSplitCount > 0
@@ -455,7 +728,7 @@
       <div class="pane-header">
         <div>
           <h2 class="pane-title">服务分流策略组</h2>
-          <p class="pane-desc">控制 Clash Verge 中显示的业务策略组顺序、开关、规则与 Rule-Provider（支持按住左侧 ⠿ 拖拽排序）。</p>
+          <p class="pane-desc">管理业务策略组顺序、开关、规则与规则集，支持 ⠿ 拖拽排序。</p>
         </div>
         <button class="btn btn-primary btn-sm" id="btn-add-service">+ 新增服务组</button>
       </div>
@@ -471,7 +744,7 @@
             }
           </div>
           <div class="ai-preset-desc">
-            拆分为 OpenAI / Claude / Gemini / Cursor / Grok / Copilot + 其他国外AI（置顶优先匹配，避免被 Google/GitHub/微软 抢占）
+            OpenAI / Claude / Gemini / Cursor / Grok / Copilot + 其他国外AI（置顶防抢占）
           </div>
         </div>
         <div class="ai-preset-actions">
@@ -497,35 +770,8 @@
         <input id="service-search-input" class="input" style="width: 210px; height: 29px" placeholder="搜索服务名称或规则..." value="${esc(serviceSearch)}" />
       </div>
 
-      <div class="entity-list">
-        ${filtered
-          .map(({ svc, idx }) => {
-            const isOpen = openServiceIdx === idx
-            return `
-              <div class="entity-card ${svc.enabled ? '' : 'is-disabled'} ${isOpen ? 'is-open' : ''}" data-drag-type="service" data-drag-idx="${idx}">
-                <div class="entity-head" draggable="true">
-                  <span class="drag-handle" title="按住拖拽调整顺序" aria-hidden="true">${DRAG_GRIP_SVG}</span>
-                  <div class="entity-head-main" data-toggle-svc-open="${idx}">
-                    <div class="entity-icon">${renderIconThumb(svc.icon, svc.name)}</div>
-                    <div class="entity-title-wrap">
-                      ${renderServiceTitleInner(svc, keyFreq)}
-                    </div>
-                  </div>
-                  <div class="entity-actions">
-                    <button class="icon-btn" data-move-svc="${idx}:-1" title="上移" ${idx === 0 ? 'disabled' : ''}>↑</button>
-                    <button class="icon-btn" data-move-svc="${idx}:1" title="下移" ${idx === state.services.length - 1 ? 'disabled' : ''}>↓</button>
-                    <button class="btn btn-sm btn-ghost" data-toggle-svc-open="${idx}" title="展开编辑">${isOpen ? '收起' : '编辑'}</button>
-                    <label class="switch" title="启用/禁用该服务组">
-                      <input type="checkbox" data-svc-toggle="${idx}" ${svc.enabled ? 'checked' : ''} />
-                      <span class="switch-track"></span>
-                    </label>
-                  </div>
-                </div>
-                ${isOpen ? renderServiceEditBody(svc, idx) : ''}
-              </div>
-            `
-          })
-          .join('')}
+      <div class="entity-list" id="service-entity-list">
+        ${renderServicesListMarkup()}
       </div>
     `
   }
@@ -570,9 +816,15 @@
               <button class="btn btn-sm" data-pick-icon="service:${idx}">选 Qure 图标</button>
             </div>
           </div>
-          <div class="field span-2">
+          <div class="field">
             <label>测速链接 (url，可选)</label>
             <input class="input mono" value="${esc(svc.url)}" data-svc-field="${idx}:url" placeholder="留空则使用默认测速地址" />
+          </div>
+          <div class="field">
+            <label>优先置顶地区 (preferRegion)</label>
+            <select class="select" data-svc-field="${idx}:preferRegion" ${svc.reject ? 'disabled' : ''}>
+              ${renderRegionPrefixOptions(svc.preferRegion)}
+            </select>
           </div>
         </div>
 
@@ -589,8 +841,8 @@
 
         <div class="field">
           <label>
-            分流规则列表 (每行一条)
-            <span class="field-hint">修改策略组名后注意同步右侧目标组名</span>
+            <span>分流规则列表 (每行一条)</span>
+            <span id="svc-sync-slot-${idx}">${renderServiceRuleSyncSlot(svc, idx)}</span>
           </label>
           <textarea class="textarea mono" rows="4" data-svc-rules="${idx}">${esc((svc.rules || []).join('\n'))}</textarea>
         </div>
@@ -617,7 +869,7 @@
       <div class="pane-header">
         <div>
           <h2 class="pane-title">地区自动分组 (URLTest)</h2>
-          <p class="pane-desc">按从上到下的顺序用正则匹配机场节点名，支持按住左侧 ⠿ 拖拽排序；未命中任何地区的节点会归入「其他节点」。</p>
+          <p class="pane-desc">按顺序正则分组并保留展示顺序，支持 ⠿ 拖拽排序，未命中归入「其他节点」。</p>
         </div>
         <button class="btn btn-primary btn-sm" id="btn-add-region">+ 新增地区</button>
       </div>
@@ -706,18 +958,18 @@
     const sg = state.systemGroups
     const bp = state.builtinProxies
     const items = [
-      { key: 'defaultGroup', title: '默认节点组', hasUrl: false, hasProxies: true },
-      { key: 'otherGroup', title: '未匹配地区兜底组（自动收集其他节点）', hasUrl: false, hasProxies: false },
-      { key: 'downloadGroup', title: '下载软件策略组', hasUrl: false, hasProxies: true },
-      { key: 'otherForeignGroup', title: '其他外网兜底组', hasUrl: false, hasProxies: true },
-      { key: 'cnGroup', title: '国内网站策略组', hasUrl: true, hasProxies: true },
+      { key: 'defaultGroup', title: '默认节点组', hasUrl: false, hasProxies: true, hasPreferRegion: true },
+      { key: 'otherGroup', title: '未匹配地区兜底组', hasUrl: false, hasProxies: false, hasPreferRegion: false },
+      { key: 'downloadGroup', title: '下载软件策略组', hasUrl: false, hasProxies: true, hasPreferRegion: false },
+      { key: 'otherForeignGroup', title: '其他外网兜底组', hasUrl: false, hasProxies: true, hasPreferRegion: false },
+      { key: 'cnGroup', title: '国内网站策略组', hasUrl: true, hasProxies: true, hasPreferRegion: false },
     ]
 
     elEditor.innerHTML = `
       <div class="pane-header">
         <div>
           <h2 class="pane-title">系统与兜底策略组</h2>
-          <p class="pane-desc">自定义「默认节点」「其他节点」「下载软件」「其他外网」「国内网站」以及内置直连/拒绝节点。候选列表支持占位符：<code>$regions</code>（全部地区）、<code>$other</code>（其他节点）、<code>$default</code>（默认节点）、<code>$cn</code>（国内网站）。</p>
+          <p class="pane-desc">自定义系统策略组与内置直连/拒绝节点，候选列表支持 <code>$regions</code> / <code>$other</code> / <code>$default</code> / <code>$cn</code>。</p>
         </div>
       </div>
 
@@ -759,6 +1011,21 @@
                   <div class="field span-2">
                     <label>测速链接 (url)</label>
                     <input class="input mono" data-bind="systemGroups.${meta.key}.url" value="${esc(g.url || '')}" />
+                  </div>
+                `
+                    : ''
+                }
+                ${
+                  meta.hasPreferRegion
+                    ? `
+                  <div class="field span-2">
+                    <label>
+                      优先置顶地区 (preferRegion)
+                      <span class="field-hint">命中后会将该地区移至候选列表首位（默认 SG）</span>
+                    </label>
+                    <select class="select" data-bind="systemGroups.${meta.key}.preferRegion">
+                      ${renderRegionPrefixOptions(g.preferRegion)}
+                    </select>
                   </div>
                 `
                     : ''
@@ -836,14 +1103,14 @@
       <div class="pane-header">
         <div>
           <h2 class="pane-title">DNS 与基础规则</h2>
-          <p class="pane-desc">选择 DNS 预设模式或切换为自定义 DNS，并管理 Fake-IP 过滤与首尾规则。</p>
+          <p class="pane-desc">配置 DNS 预设/自定义模式、Fake-IP 过滤与首尾规则。</p>
         </div>
       </div>
 
       <div class="section-card">
         <div class="section-card-head">
           <h3 class="section-card-title">DNS 预设模式 (mode)</h3>
-          <span class="field-hint">${isPreset ? '预设模式会在运行时自动覆盖下方四组 DNS' : '当前为自定义模式，下方填写的 DNS 直接生效'}</span>
+          <span class="field-hint">${isPreset ? '预设模式运行时自动覆盖下方 DNS' : '自定义模式，下方 DNS 直接生效'}</span>
         </div>
         <div class="mode-grid">
           ${DNS_MODES.map(
@@ -1052,7 +1319,20 @@
       <div class="pane-header">
         <div>
           <h2 class="pane-title">内核端口、TUN 与 GeoX</h2>
-          <p class="pane-desc">对应 <code>main(config)</code> 3.1 节覆盖的基础 Mihomo 参数、策略组通用测速、Sniffer 与 NTP。</p>
+          <p class="pane-desc">对应 <code>main(config)</code> 3.1 节，标记「不写入脚本」的项默认不导出。</p>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-info-title">导出时写入 Clash Verge 接管字段</div>
+            <div class="toggle-info-desc">默认关闭，端口 / TUN / IPv6 等以 Clash Verge 设置页为准；给其他客户端用时再开启。</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" data-bind="exportOptions.includeVergeManaged" ${includeVergeManagedFields() ? 'checked' : ''} />
+            <span class="switch-track"></span>
+          </label>
         </div>
       </div>
 
@@ -1062,23 +1342,23 @@
         </div>
         <div class="form-grid-3" style="margin-bottom: 12px">
           <div class="field">
-            <label>HTTP 端口 (port)</label>
+            <label>HTTP 端口 (port) ${heldPill()}</label>
             <input type="number" class="input mono" data-bind="core.port" data-type="number" value="${esc(c.port)}" />
           </div>
           <div class="field">
-            <label>SOCKS5 端口</label>
+            <label>SOCKS5 端口 ${heldPill()}</label>
             <input type="number" class="input mono" data-bind="core.socksPort" data-type="number" value="${esc(c.socksPort)}" />
           </div>
           <div class="field">
-            <label>混合端口 (mixed-port)</label>
+            <label>混合端口 (mixed-port) ${heldPill()}</label>
             <input type="number" class="input mono" data-bind="core.mixedPort" data-type="number" value="${esc(c.mixedPort)}" />
           </div>
           <div class="field">
-            <label>Redir 端口</label>
+            <label>Redir 端口 ${heldPill()}</label>
             <input type="number" class="input mono" data-bind="core.redirPort" data-type="number" value="${esc(c.redirPort)}" />
           </div>
           <div class="field">
-            <label>TProxy 端口</label>
+            <label>TProxy 端口 ${heldPill()}</label>
             <input type="number" class="input mono" data-bind="core.tproxyPort" data-type="number" value="${esc(c.tproxyPort)}" />
           </div>
           <div class="field">
@@ -1090,7 +1370,7 @@
         <div class="switch-grid">
           <div class="switch-cell">
             <div>
-              <div class="switch-cell-title">允许局域网连接</div>
+              <div class="switch-cell-title">允许局域网连接 ${heldPill()}</div>
               <div class="switch-cell-sub">allow-lan</div>
             </div>
             <label class="switch">
@@ -1100,7 +1380,7 @@
           </div>
           <div class="switch-cell">
             <div>
-              <div class="switch-cell-title">统一延迟计算</div>
+              <div class="switch-cell-title">统一延迟计算 ${heldPill()}</div>
               <div class="switch-cell-sub">unified-delay</div>
             </div>
             <label class="switch">
@@ -1126,7 +1406,7 @@
 
         <div class="form-grid">
           <div class="field">
-            <label>外部控制地址 (external-controller)</label>
+            <label>外部控制地址 (external-controller) ${heldPill()}</label>
             <input class="input mono" data-bind="core.externalController" value="${esc(c.externalController)}" />
           </div>
           <div class="field">
@@ -1208,7 +1488,7 @@
           </div>
           <div class="switch-cell">
             <div>
-              <div class="switch-cell-title">CORS 允许私有网络访问</div>
+              <div class="switch-cell-title">CORS 允许私有网络访问 ${heldPill()}</div>
               <div class="switch-cell-sub">allow-private-network</div>
             </div>
             <label class="switch">
@@ -1217,7 +1497,7 @@
             </label>
           </div>
           <div class="field">
-            <label>CORS 允许来源 (allow-origins，每行一个)</label>
+            <label>CORS 允许来源 (allow-origins，每行一个) ${heldPill()}</label>
             <textarea class="textarea mono" rows="1" style="min-height: 44px" data-lines="core.corsAllowOrigins">${esc((c.corsAllowOrigins || ['*']).join('\n'))}</textarea>
           </div>
         </div>
@@ -1230,7 +1510,7 @@
         <div class="switch-grid">
           <div class="switch-cell">
             <div>
-              <div class="switch-cell-title">启用 TUN</div>
+              <div class="switch-cell-title">启用 TUN ${heldPill()}</div>
               <div class="switch-cell-sub">tun.enable</div>
             </div>
             <label class="switch">
@@ -1240,7 +1520,7 @@
           </div>
           <div class="switch-cell">
             <div>
-              <div class="switch-cell-title">严格路由</div>
+              <div class="switch-cell-title">严格路由 ${heldPill()}</div>
               <div class="switch-cell-sub">strict-route</div>
             </div>
             <label class="switch">
@@ -1250,7 +1530,7 @@
           </div>
           <div class="switch-cell">
             <div>
-              <div class="switch-cell-title">自动配置路由</div>
+              <div class="switch-cell-title">自动配置路由 ${heldPill()}</div>
               <div class="switch-cell-sub">auto-route</div>
             </div>
             <label class="switch">
@@ -1260,7 +1540,7 @@
           </div>
           <div class="switch-cell">
             <div>
-              <div class="switch-cell-title">自动重定向</div>
+              <div class="switch-cell-title">自动重定向 ${heldPill()}</div>
               <div class="switch-cell-sub">auto-redirect</div>
             </div>
             <label class="switch">
@@ -1270,7 +1550,7 @@
           </div>
           <div class="switch-cell">
             <div>
-              <div class="switch-cell-title">自动检测出口网卡</div>
+              <div class="switch-cell-title">自动检测出口网卡 ${heldPill()}</div>
               <div class="switch-cell-sub">auto-detect-interface</div>
             </div>
             <label class="switch">
@@ -1291,17 +1571,17 @@
         </div>
         <div class="form-grid" style="margin-bottom: 12px">
           <div class="field">
-            <label>协议栈 (stack)</label>
+            <label>协议栈 (stack) ${heldPill()}</label>
             <select class="select" data-bind="tun.stack">
               ${['mixed', 'system', 'gvisor'].map((st) => `<option value="${st}" ${t.stack === st ? 'selected' : ''}>${st}</option>`).join('')}
             </select>
           </div>
           <div class="field">
-            <label>网卡名称 (device)</label>
+            <label>网卡名称 (device) ${heldPill()}</label>
             <input class="input mono" data-bind="tun.device" value="${esc(t.device)}" />
           </div>
           <div class="field">
-            <label>MTU</label>
+            <label>MTU ${heldPill()}</label>
             <input type="number" class="input mono" data-bind="tun.mtu" data-type="number" value="${esc(t.mtu)}" />
           </div>
           <div class="field">
@@ -1313,7 +1593,7 @@
             <textarea class="textarea mono" rows="2" data-lines="tun.excludeInterface">${esc((t.excludeInterface || []).join('\n'))}</textarea>
           </div>
           <div class="field">
-            <label>DNS 劫持 (dns-hijack，每行一个)</label>
+            <label>DNS 劫持 (dns-hijack，每行一个) ${heldPill()}</label>
             <textarea class="textarea mono" rows="2" data-lines="tun.dnsHijack">${esc((t.dnsHijack || []).join('\n'))}</textarea>
           </div>
         </div>
@@ -1458,6 +1738,22 @@
     `
   }
 
+  function renderExcludedNodesCardMarkup(analysis) {
+    if (!analysis || !analysis.excluded || analysis.excluded.length === 0) return ''
+    return `
+      <div class="section-card">
+        <div class="section-card-head">
+          <h3 class="section-card-title">被高倍率规则过滤的节点 (&gt; ${esc(state.args.globalRatioLimit)}x)</h3>
+        </div>
+        <div class="chip-group">
+          ${analysis.excluded
+            .map((item) => `<span class="pill pill-amber">${esc(item.name)} (${item.ratio}x)</span>`)
+            .join('')}
+        </div>
+      </div>
+    `
+  }
+
   function renderNodesSection() {
     const analysis = lastPreviewResult ? lastPreviewResult.analysis : { kept: [], excluded: [] }
 
@@ -1465,7 +1761,7 @@
       <div class="pane-header">
         <div>
           <h2 class="pane-title">模拟订阅节点</h2>
-          <p class="pane-desc">用于驱动右侧 Clash Verge 预览，不会写入导出的 <code>global_script.js</code>。可直接粘贴你的机场节点名或 Clash YAML <code>proxies</code> 片段。</p>
+          <p class="pane-desc">仅用于右侧预览（不写入脚本），支持粘贴节点名或 Clash YAML <code>proxies</code>。</p>
         </div>
         <button class="btn btn-sm" id="btn-reset-sample-nodes">恢复示例节点</button>
       </div>
@@ -1474,29 +1770,14 @@
         <div class="section-card-head">
           <h3 class="section-card-title">节点输入列表</h3>
           <div class="chip-group">
-            <span class="pill pill-green">保留 ${analysis.kept.length} 个</span>
-            <span class="pill ${analysis.excluded.length > 0 ? 'pill-amber' : 'pill-gray'}">倍率过滤 ${analysis.excluded.length} 个</span>
+            <span id="nodes-kept-pill" class="pill pill-green">保留 ${analysis.kept.length} 个</span>
+            <span id="nodes-excluded-pill" class="pill ${analysis.excluded.length > 0 ? 'pill-amber' : 'pill-gray'}">倍率过滤 ${analysis.excluded.length} 个</span>
           </div>
         </div>
         <textarea class="textarea mono" rows="15" data-bind="sampleNodesText" placeholder="每行一个节点名称，例如：\n🇭🇰 香港 01 | IEPL 1x\n🇺🇸 美国 01 | 洛杉矶 1.5x">${esc(state.sampleNodesText)}</textarea>
       </div>
 
-      ${
-        analysis.excluded.length > 0
-          ? `
-        <div class="section-card">
-          <div class="section-card-head">
-            <h3 class="section-card-title">被高倍率规则过滤的节点 (&gt; ${esc(state.args.globalRatioLimit)}x)</h3>
-          </div>
-          <div class="chip-group">
-            ${analysis.excluded
-              .map((item) => `<span class="pill pill-amber">${esc(item.name)} (${item.ratio}x)</span>`)
-              .join('')}
-          </div>
-        </div>
-      `
-          : ''
-      }
+      <div id="nodes-excluded-wrap">${renderExcludedNodesCardMarkup(analysis)}</div>
     `
   }
 
@@ -1527,11 +1808,59 @@
     else if (activePreviewTab === 'js') renderPreviewJs()
   }
 
+  function getVisiblePreviewGroups() {
+    const groups = lastPreviewResult?.config?.['proxy-groups'] || []
+    const q = groupSearch.trim().toLowerCase()
+    return groups.filter((g) => !q || g.name.toLowerCase().includes(q))
+  }
+
+  function renderPreviewGroupsListMarkup(visibleGroups) {
+    if (visibleGroups.length === 0) {
+      return `<div class="empty-state">暂无匹配的代理组${!state.args.enable ? '（脚本未启用）' : ''}</div>`
+    }
+    return `
+      <div class="verge-group-list">
+        ${visibleGroups.map((g) => renderVergeGroupCard(g)).join('')}
+      </div>
+    `
+  }
+
+  function updateExpandAllButton(visibleGroups) {
+    const allExpanded = visibleGroups.length > 0 && visibleGroups.every((g) => expandedPreviewGroups.has(g.name))
+    const btn = document.getElementById('btn-toggle-expand-all')
+    if (btn) {
+      btn.textContent = allExpanded ? '全部收起' : '全部展开'
+    } else {
+      elPreviewExtra.innerHTML = `
+        <button class="btn btn-sm btn-ghost" id="btn-toggle-expand-all">${allExpanded ? '全部收起' : '全部展开'}</button>
+      `
+    }
+  }
+
+  function renderDiagnosticsBanner() {
+    if (!lastDiagnostics || lastDiagnostics.length === 0) return ''
+    const hasError = lastDiagnostics.some((d) => d.level === 'error')
+    return `
+      <div class="diag-banner ${hasError ? 'is-error' : 'is-warn'}">
+        <div class="diag-head">
+          <strong>${hasError ? '配置静态诊断异常' : '配置静态诊断提示'} (${lastDiagnostics.length})</strong>
+        </div>
+        <ul class="diag-list">
+          ${lastDiagnostics
+            .map(
+              (d) =>
+                `<li><span class="pill ${d.level === 'error' ? 'pill-red' : 'pill-amber'}">${d.level === 'error' ? '错误' : '提示'}</span><span>${esc(d.message)}</span></li>`
+            )
+            .join('')}
+        </ul>
+      </div>
+    `
+  }
+
   function renderPreviewGroups() {
     const cfg = lastPreviewResult.config
     const groups = cfg['proxy-groups'] || []
-    const q = groupSearch.trim().toLowerCase()
-    const visibleGroups = groups.filter((g) => !q || g.name.toLowerCase().includes(q))
+    const visibleGroups = getVisiblePreviewGroups()
     const allExpanded = visibleGroups.length > 0 && visibleGroups.every((g) => expandedPreviewGroups.has(g.name))
 
     elPreviewExtra.innerHTML = `
@@ -1540,14 +1869,14 @@
 
     const excludedCount = lastPreviewResult.analysis.excluded.length
     const disabledBanner = !state.args.enable
-      ? `<div class="error-banner" style="background:var(--warning-soft);border-color:#fde68a;color:var(--warning)">当前 <code>enable = false</code>，脚本直接返回原始订阅，不会生成任何策略组。</div>`
+      ? `<div class="error-banner is-warn"><code>enable = false</code>，脚本将直接返回原始订阅。</div>`
       : ''
 
     const modeHint =
       vergeMode === 'direct'
-        ? `<div class="verge-summary-bar" style="background:var(--success-soft);border-color:#bbf7d0;color:var(--success)">当前模拟处于「直连」模式：Clash Verge 会绕过规则直接放行流量。</div>`
+        ? `<div class="verge-summary-bar is-mode-direct">直连模式模拟：绕过规则直接放行流量。</div>`
         : vergeMode === 'global'
-          ? `<div class="verge-summary-bar" style="background:var(--accent-soft);border-color:var(--accent-border);color:var(--accent)">当前模拟处于「全局」模式：所有流量统一走 GLOBAL 选定节点，下方仍可检查脚本生成的各策略组。</div>`
+          ? `<div class="verge-summary-bar is-mode-global">全局模式模拟：流量走 GLOBAL，下方仍可检查各策略组。</div>`
           : ''
 
     elPreviewBody.innerHTML = `
@@ -1561,6 +1890,7 @@
       </div>
 
       ${disabledBanner}
+      ${renderDiagnosticsBanner()}
       ${modeHint}
 
       <div class="verge-summary-bar">
@@ -1573,22 +1903,23 @@
         <input id="preview-group-search" class="input" style="width: 155px; height: 26px; font-size: 12px" placeholder="过滤代理组..." value="${esc(groupSearch)}" />
       </div>
 
-      ${
-        visibleGroups.length === 0
-          ? `<div class="empty-state">暂无匹配的代理组${!state.args.enable ? '（脚本未启用）' : ''}</div>`
-          : `
-        <div class="verge-group-list">
-          ${visibleGroups.map((g) => renderVergeGroupCard(g)).join('')}
-        </div>
-      `
-      }
+      <div id="preview-group-list-wrap">
+        ${renderPreviewGroupsListMarkup(visibleGroups)}
+      </div>
     `
   }
 
   function renderVergeGroupCard(g) {
     const isExpanded = expandedPreviewGroups.has(g.name)
     const proxies = g.proxies || []
-    const typeLabel = g.type === 'url-test' ? 'URLTest' : g.type === 'fallback' ? 'Fallback' : 'Selector'
+    const typeLabel =
+      g.type === 'url-test'
+        ? 'URLTest'
+        : g.type === 'fallback'
+          ? 'Fallback'
+          : g.type === 'load-balance'
+            ? 'LoadBalance'
+            : 'Selector'
     const isUrlTest = g.type === 'url-test'
     const currentSelected =
       simulatedSelections[g.name] && proxies.includes(simulatedSelections[g.name])
@@ -1657,12 +1988,43 @@
     `
   }
 
-  function renderPreviewRules() {
-    const cfg = lastPreviewResult.config
+  function renderRuleTesterResultMarkup(simResult) {
+    if (!ruleTestQuery.trim()) return ''
+    if (!simResult || !simResult.matched) {
+      return '<div class="rule-test-result is-miss">未命中静态规则（请输入有效域名、URL 或端口，如 <code>downloads.cursor.com</code> / <code>port:22</code>）。</div>'
+    }
+    const m = simResult.matched
+    const chainHtml = simResult.chain.map((step) => `<span class="rule-chain-step">${esc(step)}</span>`).join('<span class="rule-chain-arrow">→</span>')
+    const dynCount = simResult.passedDynamic.length
+    const dynNote =
+      dynCount > 0
+        ? `<div class="rule-test-note">此前经过 ${dynCount} 条 <code>GEOSITE</code> / <code>GEOIP</code> / <code>RULE-SET</code> 规则（若命中规则库将优先分流）。</div>`
+        : ''
+    return `
+      <div class="rule-test-result">
+        <div class="rule-test-hit">
+          <span class="pill pill-green">命中 #${m.idx}</span>
+          <code class="rule-test-raw">${esc(m.raw)}</code>
+        </div>
+        ${simResult.chain.length > 0 ? `<div class="rule-chain">${chainHtml}</div>` : ''}
+        ${dynNote}
+      </div>
+    `
+  }
+
+  function renderPreviewRulesTableMarkup(matchedRuleIdx) {
+    const cfg = lastPreviewResult?.config || {}
     const rules = cfg.rules || []
-    const providers = cfg['rule-providers'] || {}
-    const providerEntries = Object.entries(providers)
     const q = ruleSearch.trim().toLowerCase()
+    const validTargets = new Set([
+      'DIRECT',
+      'REJECT',
+      'REJECT-DROP',
+      'PASS',
+      'COMPATIBLE',
+      ...(cfg['proxy-groups'] || []).map((g) => g.name),
+      ...(cfg.proxies || []).map((p) => p.name),
+    ])
 
     const filtered = rules
       .map((raw, idx) => {
@@ -1678,9 +2040,59 @@
     const rejectName = state.builtinProxies?.rejectName || '拒绝'
     const rejectGroups = new Set(state.services.filter((s) => s.reject).map((s) => s.name))
 
+    if (filtered.length === 0) {
+      return '<div class="empty-state" style="border:none">无匹配的分流规则</div>'
+    }
+
+    return filtered
+      .map((r) => {
+        const isDead = r.target && !validTargets.has(r.target)
+        const isHit = matchedRuleIdx && r.idx === matchedRuleIdx
+        const targetCls = isDead
+          ? 'is-reject'
+          : r.target === directName || r.target === 'DIRECT'
+            ? 'is-direct'
+            : r.target === rejectName || r.target === 'REJECT' || rejectGroups.has(r.target)
+              ? 'is-reject'
+              : ''
+        return `
+          <div class="rule-row ${isHit ? 'is-matched' : ''}">
+            <span class="rule-idx">#${r.idx}</span>
+            <span class="rule-type">${esc(r.type)}</span>
+            <span class="rule-payload" title="${esc(r.raw)}">${esc(r.payload)}</span>
+            <span class="rule-target ${targetCls}" ${isDead ? 'title="目标策略组或节点未定义"' : ''}>${esc(r.target)}${isDead ? ' !' : ''}</span>
+          </div>
+        `
+      })
+      .join('')
+  }
+
+  function renderPreviewRules() {
+    const cfg = lastPreviewResult.config
+    const rules = cfg.rules || []
+    const providers = cfg['rule-providers'] || {}
+    const providerEntries = Object.entries(providers)
+    const simResult = ruleTestQuery.trim() ? simulateRuleMatch(ruleTestQuery, cfg, simulatedSelections) : null
+
     elPreviewExtra.innerHTML = `<span class="pill pill-blue">${rules.length} 规则 / ${providerEntries.length} 规则集</span>`
 
     elPreviewBody.innerHTML = `
+      ${renderDiagnosticsBanner()}
+
+      <div class="section-card rule-tester-card">
+        <div class="section-card-head" style="margin-bottom: 8px">
+          <h3 class="section-card-title">分流命中测试</h3>
+          <div class="chip-group">
+            <button class="chip" data-test-sample="downloads.cursor.com">downloads.cursor.com</button>
+            <button class="chip" data-test-sample="gemini.google.com">gemini.google.com</button>
+            <button class="chip" data-test-sample="api.openai.com">api.openai.com</button>
+            <button class="chip" data-test-sample="port:22">port:22</button>
+          </div>
+        </div>
+        <input id="preview-rule-tester" class="input mono" placeholder="输入域名、URL 或端口测试命中，例如 api.cursor.sh / https://claude.ai / port:22..." value="${esc(ruleTestQuery)}" />
+        <div id="preview-rule-test-result">${renderRuleTesterResultMarkup(simResult)}</div>
+      </div>
+
       <div class="verge-search-row">
         <input id="preview-rule-search" class="input" placeholder="搜索规则（如 GEOSITE、国外AI、22、RULE-SET）..." value="${esc(ruleSearch)}" />
       </div>
@@ -1702,29 +2114,8 @@
           : ''
       }
 
-      <div class="rules-table">
-        ${
-          filtered.length === 0
-            ? '<div class="empty-state" style="border:none">无匹配的分流规则</div>'
-            : filtered
-                .map((r) => {
-                  const targetCls =
-                    r.target === directName || r.target === 'DIRECT'
-                      ? 'is-direct'
-                      : r.target === rejectName || r.target === 'REJECT' || rejectGroups.has(r.target)
-                        ? 'is-reject'
-                        : ''
-                  return `
-                    <div class="rule-row">
-                      <span class="rule-idx">#${r.idx}</span>
-                      <span class="rule-type">${esc(r.type)}</span>
-                      <span class="rule-payload" title="${esc(r.raw)}">${esc(r.payload)}</span>
-                      <span class="rule-target ${targetCls}">${esc(r.target)}</span>
-                    </div>
-                  `
-                })
-                .join('')
-        }
+      <div class="rules-table" id="preview-rules-table">
+        ${renderPreviewRulesTableMarkup(simResult?.matched?.idx)}
       </div>
     `
   }
@@ -1822,11 +2213,18 @@
     } catch {
       const ta = document.createElement('textarea')
       ta.value = text
+      ta.setAttribute('readonly', '')
+      ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0'
       document.body.appendChild(ta)
       ta.select()
-      document.execCommand('copy')
+      let ok = false
+      try {
+        ok = document.execCommand('copy')
+      } catch {
+        ok = false
+      }
       document.body.removeChild(ta)
-      showToast(`已复制${label}`)
+      showToast(ok ? `已复制${label}` : '复制失败，请手动选中复制')
     }
   }
 
@@ -1861,10 +2259,21 @@
 
   elPreviewExtra.addEventListener('click', (e) => {
     if (e.target.closest('#btn-toggle-expand-all')) {
-      const groups = (lastPreviewResult?.config?.['proxy-groups'] || []).map((g) => g.name)
-      const allOpen = groups.every((n) => expandedPreviewGroups.has(n))
-      expandedPreviewGroups = allOpen ? new Set() : new Set(groups)
-      renderPreviewGroups()
+      const visibleGroups = getVisiblePreviewGroups()
+      const visibleNames = visibleGroups.map((g) => g.name)
+      const allOpen = visibleNames.length > 0 && visibleNames.every((n) => expandedPreviewGroups.has(n))
+      if (allOpen) {
+        visibleNames.forEach((n) => expandedPreviewGroups.delete(n))
+      } else {
+        visibleNames.forEach((n) => expandedPreviewGroups.add(n))
+      }
+      const listWrap = document.getElementById('preview-group-list-wrap')
+      if (listWrap) {
+        listWrap.innerHTML = renderPreviewGroupsListMarkup(visibleGroups)
+        updateExpandAllButton(visibleGroups)
+      } else {
+        renderPreviewGroups()
+      }
     } else if (e.target.closest('#btn-copy-yaml')) {
       copyText(toYaml(lastPreviewResult.config), '输出 YAML')
     } else if (e.target.closest('#btn-copy-js-inline')) {
@@ -1889,6 +2298,19 @@
       return
     }
 
+    const sampleBtn = e.target.closest('[data-test-sample]')
+    if (sampleBtn) {
+      ruleTestQuery = sampleBtn.dataset.testSample
+      const tester = document.getElementById('preview-rule-tester')
+      if (tester) tester.value = ruleTestQuery
+      const simResult = simulateRuleMatch(ruleTestQuery, lastPreviewResult?.config, simulatedSelections)
+      const resEl = document.getElementById('preview-rule-test-result')
+      if (resEl) resEl.innerHTML = renderRuleTesterResultMarkup(simResult)
+      const rulesTable = document.getElementById('preview-rules-table')
+      if (rulesTable) rulesTable.innerHTML = renderPreviewRulesTableMarkup(simResult?.matched?.idx)
+      return
+    }
+
     const selectBtn = e.target.closest('[data-verge-group][data-verge-proxy]')
     if (selectBtn) {
       const gName = selectBtn.dataset.vergeGroup
@@ -1902,20 +2324,30 @@
   elPreviewBody.addEventListener('input', (e) => {
     if (e.target.id === 'preview-group-search') {
       groupSearch = e.target.value
-      renderPreviewGroups()
-      const inp = document.getElementById('preview-group-search')
-      if (inp) {
-        inp.focus()
-        inp.setSelectionRange(groupSearch.length, groupSearch.length)
+      const visibleGroups = getVisiblePreviewGroups()
+      const listWrap = document.getElementById('preview-group-list-wrap')
+      if (listWrap) {
+        listWrap.innerHTML = renderPreviewGroupsListMarkup(visibleGroups)
+        updateExpandAllButton(visibleGroups)
       }
     } else if (e.target.id === 'preview-rule-search') {
       ruleSearch = e.target.value
-      renderPreviewRules()
-      const inp = document.getElementById('preview-rule-search')
-      if (inp) {
-        inp.focus()
-        inp.setSelectionRange(ruleSearch.length, ruleSearch.length)
+      const simResult = ruleTestQuery.trim()
+        ? simulateRuleMatch(ruleTestQuery, lastPreviewResult?.config, simulatedSelections)
+        : null
+      const rulesTable = document.getElementById('preview-rules-table')
+      if (rulesTable) {
+        rulesTable.innerHTML = renderPreviewRulesTableMarkup(simResult?.matched?.idx)
       }
+    } else if (e.target.id === 'preview-rule-tester') {
+      ruleTestQuery = e.target.value
+      const simResult = ruleTestQuery.trim()
+        ? simulateRuleMatch(ruleTestQuery, lastPreviewResult?.config, simulatedSelections)
+        : null
+      const resEl = document.getElementById('preview-rule-test-result')
+      if (resEl) resEl.innerHTML = renderRuleTesterResultMarkup(simResult)
+      const rulesTable = document.getElementById('preview-rules-table')
+      if (rulesTable) rulesTable.innerHTML = renderPreviewRulesTableMarkup(simResult?.matched?.idx)
     }
   })
 
@@ -1925,11 +2357,9 @@
 
     if (el.id === 'service-search-input') {
       serviceSearch = el.value
-      renderServicesSection()
-      const inp = document.getElementById('service-search-input')
-      if (inp) {
-        inp.focus()
-        inp.setSelectionRange(serviceSearch.length, serviceSearch.length)
+      const listEl = document.getElementById('service-entity-list')
+      if (listEl) {
+        listEl.innerHTML = renderServicesListMarkup()
       }
       return
     }
@@ -1939,22 +2369,37 @@
       if (el.dataset.type === 'number') val = el.value.trim() === '' ? '' : Number(el.value)
       setByPath(state, el.dataset.bind, val)
       recomputePreview()
-      if (activeSection === 'nodes') {
-        // Update pills without stealing textarea focus
-        const stats = elEditor.querySelectorAll('.section-card-head .pill')
-        if (stats.length >= 2 && lastPreviewResult) {
-          stats[0].textContent = `保留 ${lastPreviewResult.analysis.kept.length} 个`
-          stats[1].textContent = `倍率过滤 ${lastPreviewResult.analysis.excluded.length} 个`
+      if (el.dataset.bind === 'exportOptions.includeVergeManaged') {
+        renderEditor()
+        return
+      }
+      if (activeSection === 'nodes' && lastPreviewResult) {
+        // Update stats & excluded nodes card without stealing textarea focus
+        const keptPill = document.getElementById('nodes-kept-pill')
+        const excPill = document.getElementById('nodes-excluded-pill')
+        const excWrap = document.getElementById('nodes-excluded-wrap')
+        const analysis = lastPreviewResult.analysis
+        if (keptPill) keptPill.textContent = `保留 ${analysis.kept.length} 个`
+        if (excPill) {
+          excPill.className = `pill ${analysis.excluded.length > 0 ? 'pill-amber' : 'pill-gray'}`
+          excPill.textContent = `倍率过滤 ${analysis.excluded.length} 个`
         }
-      } else if (activeSection === 'general' && (el.dataset.bind === 'args.multiplierRegex' || el.dataset.bind === 'args.multiplierFlags' || el.dataset.bind === 'args.globalRatioLimit')) {
+        if (excWrap) excWrap.innerHTML = renderExcludedNodesCardMarkup(analysis)
+      } else if (
+        activeSection === 'general' &&
+        (el.dataset.bind === 'args.excludeHighPercentage' ||
+          el.dataset.bind === 'args.multiplierRegex' ||
+          el.dataset.bind === 'args.multiplierFlags' ||
+          el.dataset.bind === 'args.globalRatioLimit')
+      ) {
         const valid = lastPreviewResult?.analysis?.multiplierValid !== false
-        const regexPill = elEditor.querySelector('.field label .pill')
+        const regexPill = document.getElementById('multiplier-regex-pill')
         if (regexPill) {
           regexPill.className = `pill ${valid ? 'pill-green' : 'pill-red'}`
           regexPill.textContent = valid ? '正则有效' : '正则语法错误'
         }
         const excCount = lastPreviewResult ? lastPreviewResult.analysis.excluded.length : 0
-        const excPill = elEditor.querySelector('.section-card-head .pill')
+        const excPill = document.getElementById('multiplier-excluded-pill')
         if (excPill) {
           excPill.className = `pill ${excCount > 0 ? 'pill-amber' : 'pill-gray'}`
           excPill.textContent = `当前模拟订阅已过滤 ${excCount} 个节点`
@@ -1989,9 +2434,14 @@
 
     if (el.dataset.svcField) {
       const [idxStr, field] = el.dataset.svcField.split(':')
-      state.services[Number(idxStr)][field] = el.value
+      const idx = Number(idxStr)
+      state.services[idx][field] = el.value
       recomputePreview()
       refreshServiceCardHeaders()
+      if (field === 'name') {
+        const slot = document.getElementById(`svc-sync-slot-${idx}`)
+        if (slot) slot.innerHTML = renderServiceRuleSyncSlot(state.services[idx], idx)
+      }
       return
     }
 
@@ -2000,6 +2450,8 @@
       state.services[idx].rules = el.value.split(/\r?\n/)
       recomputePreview()
       refreshServiceCardHeaders()
+      const slot = document.getElementById(`svc-sync-slot-${idx}`)
+      if (slot) slot.innerHTML = renderServiceRuleSyncSlot(state.services[idx], idx)
       return
     }
 
@@ -2053,12 +2505,6 @@
       renderRegionsSection()
       return
     }
-
-    if (el.dataset.bind === 'args.excludeHighPercentage') {
-      state.args.excludeHighPercentage = el.checked
-      recomputePreview()
-      renderGeneralSection()
-    }
   })
 
   // Editor Click Events
@@ -2087,6 +2533,7 @@
     }
 
     if (t.closest('#btn-add-builtin-prov')) {
+      pushUndo('添加预置规则集')
       state.builtinProviders.push({
         key: 'custom-provider',
         behavior: 'classical',
@@ -2101,6 +2548,7 @@
 
     const delBuiltinProv = t.closest('[data-del-builtin-prov]')
     if (delBuiltinProv) {
+      pushUndo('删除预置规则集')
       state.builtinProviders.splice(Number(delBuiltinProv.dataset.delBuiltinProv), 1)
       recomputePreview()
       renderDnsSection()
@@ -2108,6 +2556,7 @@
     }
 
     if (t.closest('#btn-add-dns-policy')) {
+      pushUndo('添加 DNS 分流策略')
       state.dnsExtra.nameserverPolicy.push({ match: 'geosite:', target: '$foreignDNS' })
       recomputePreview()
       renderDnsSection()
@@ -2116,6 +2565,7 @@
 
     const delPolicy = t.closest('[data-del-dns-policy]')
     if (delPolicy) {
+      pushUndo('删除 DNS 分流策略')
       state.dnsExtra.nameserverPolicy.splice(Number(delPolicy.dataset.delDnsPolicy), 1)
       recomputePreview()
       renderDnsSection()
@@ -2124,23 +2574,27 @@
 
     // Service actions
     if (t.closest('#btn-apply-ai-split')) {
+      pushUndo('应用海外 AI 细分预设')
       const removeKeys = new Set(['openai', ...FOREIGN_AI_SPLIT_KEYS])
       state.services = state.services.filter((s) => !removeKeys.has(s.key))
       const presetGroups = createForeignAiSplitPreset()
       state.services.unshift(...presetGroups)
       openServiceIdx = -1
+      openServiceOriginalName = ''
       recomputePreview()
       renderServicesSection()
-      showToast('已应用海外 AI 细分预设（OpenAI / Claude / Gemini / Cursor / Grok / Copilot + 其他国外AI）')
+      showToast('已应用海外 AI 细分预设（7 组）')
       return
     }
 
     if (t.closest('#btn-merge-ai-split')) {
+      pushUndo('合并海外 AI 策略组')
       const removeKeys = new Set(['openai', ...FOREIGN_AI_SPLIT_KEYS])
       const firstIdx = state.services.findIndex((s) => removeKeys.has(s.key))
       state.services = state.services.filter((s) => !removeKeys.has(s.key))
       state.services.splice(firstIdx >= 0 ? firstIdx : 0, 0, createMergedForeignAiService())
       openServiceIdx = -1
+      openServiceOriginalName = ''
       recomputePreview()
       renderServicesSection()
       showToast('已合并回单个「国外AI」策略组')
@@ -2153,13 +2607,16 @@
       const dailyKeys = new Set(['openai', ...FOREIGN_AI_SPLIT_KEYS, 'youtube', 'netflix', 'telegram', 'ads', 'apple', 'google', 'github', 'microsoft'])
       const devKeys = new Set(['openai', ...FOREIGN_AI_SPLIT_KEYS, 'google', 'github', 'microsoft', 'ads'])
       if (p === 'devLean') {
+        pushUndo('应用「开发精简」预设')
         applyDevLeanPreset(state)
         openServiceIdx = -1
+        openServiceOriginalName = ''
         recomputePreview()
         renderServicesSection()
-        showToast('已应用「开发精简」：downloads.cursor.com 直连，YouTube 在谷歌服务前，AI 与默认节点优先新加坡')
+        showToast('已应用「开发精简」预设（Cursor 下载直连，默认与 AI 优先 SG）')
         return
       }
+      pushUndo('切换服务组预设')
       state.services.forEach((s) => {
         if (p === 'all') s.enabled = true
         else if (p === 'none') s.enabled = false
@@ -2172,21 +2629,65 @@
     }
 
     if (t.closest('#btn-add-service')) {
-      const id = 'custom_' + (state.services.length + 1)
+      pushUndo('新增服务组')
+      const existingKeys = new Set(state.services.map((s) => s.key))
+      let n = state.services.length + 1
+      let id = 'custom_' + n
+      while (existingKeys.has(id)) {
+        n += 1
+        id = 'custom_' + n
+      }
+      const existingNames = new Set(state.services.map((s) => s.name))
+      let svcName = '自定义服务'
+      let nameIdx = 2
+      while (existingNames.has(svcName)) {
+        svcName = `自定义服务 ${nameIdx}`
+        nameIdx += 1
+      }
       state.services.unshift({
         key: id,
-        name: '自定义服务',
+        name: svcName,
         enabled: true,
+        preferRegion: '',
         icon: window.YaNetDefaults.QURE_BASE + 'Global.png',
         url: 'https://www.gstatic.com/generate_204',
         reject: false,
         directFirst: false,
-        rules: ['DOMAIN-SUFFIX,example.com,自定义服务'],
+        rules: [`DOMAIN-SUFFIX,example.com,${svcName}`],
         providers: [],
       })
       openServiceIdx = 0
+      openServiceOriginalName = svcName
       recomputePreview()
       renderServicesSection()
+      return
+    }
+
+    const syncSvcRules = t.closest('[data-sync-svc-rules]')
+    if (syncSvcRules) {
+      const idx = Number(syncSvcRules.dataset.syncSvcRules)
+      const svc = state.services[idx]
+      const oldName = openServiceOriginalName
+      const newName = String(svc?.name || '').trim()
+      if (svc && oldName && newName && oldName !== newName) {
+        pushUndo(`同步「${newName}」规则目标`)
+        let replaced = 0
+        svc.rules = (svc.rules || []).map((line) => {
+          const parts = String(line || '').split(',')
+          const type = (parts[0] || '').trim().toUpperCase()
+          const targetIdx = type === 'MATCH' ? 1 : 2
+          if (parts.length > targetIdx && parts[targetIdx].trim() === oldName) {
+            parts[targetIdx] = newName
+            replaced += 1
+            return parts.join(',')
+          }
+          return line
+        })
+        openServiceOriginalName = newName
+        recomputePreview()
+        renderServicesSection()
+        showToast(`已将 ${replaced} 条规则目标同步为「${newName}」`)
+      }
       return
     }
 
@@ -2194,6 +2695,7 @@
     if (toggleSvcOpen) {
       const idx = Number(toggleSvcOpen.dataset.toggleSvcOpen)
       openServiceIdx = openServiceIdx === idx ? -1 : idx
+      openServiceOriginalName = openServiceIdx >= 0 ? String(state.services[openServiceIdx]?.name || '').trim() : ''
       renderServicesSection()
       return
     }
@@ -2203,6 +2705,7 @@
       const [idx, dir] = moveSvc.dataset.moveSvc.split(':').map(Number)
       const target = idx + dir
       if (target >= 0 && target < state.services.length) {
+        pushUndo('调整服务组顺序')
         const [item] = state.services.splice(idx, 1)
         state.services.splice(target, 0, item)
         if (openServiceIdx === idx) openServiceIdx = target
@@ -2215,6 +2718,7 @@
 
     const addSvcProv = t.closest('[data-add-svc-prov]')
     if (addSvcProv) {
+      pushUndo('添加服务规则集')
       const idx = Number(addSvcProv.dataset.addSvcProv)
       const svc = state.services[idx]
       const existingKeys = new Set(
@@ -2241,6 +2745,7 @@
 
     const delSvcProv = t.closest('[data-del-svc-prov]')
     if (delSvcProv) {
+      pushUndo('删除服务规则集')
       const [idx, pIdx] = delSvcProv.dataset.delSvcProv.split(':').map(Number)
       state.services[idx].providers.splice(pIdx, 1)
       recomputePreview()
@@ -2251,17 +2756,20 @@
     const delSvc = t.closest('[data-del-svc]')
     if (delSvc) {
       const idx = Number(delSvc.dataset.delSvc)
+      pushUndo(`删除服务组「${state.services[idx]?.name || ''}」`)
       state.services.splice(idx, 1)
       openServiceIdx = -1
+      openServiceOriginalName = ''
       recomputePreview()
       renderServicesSection()
-      showToast('已删除服务组')
+      showToast('已删除服务组（可点击顶栏撤销）')
       return
     }
 
     // Region actions
     const regPreset = t.closest('[data-reg-preset]')
     if (regPreset) {
+      pushUndo('切换地区分组预设')
       const p = regPreset.dataset.regPreset
       const corePrefixes = new Set(['HK', 'US', 'JP', 'SG', 'TW'])
       state.regions.forEach((r) => {
@@ -2275,13 +2783,41 @@
     }
 
     if (t.closest('#btn-add-region')) {
-      state.regions.push({
-        name: 'FR法国',
-        regex: '法国|🇫🇷|fr|france',
-        flags: 'i',
-        icon: window.YaNetDefaults.QURE_BASE + 'France.png',
-        enabled: true,
-      })
+      pushUndo('新增地区分组')
+      const extraRegionTemplates = [
+        { name: 'FR法国', regex: '法国|🇫🇷|fr|france', icon: 'France.png' },
+        { name: 'NL荷兰', regex: '荷兰|🇳🇱|nl|netherlands|amsterdam', icon: 'World_Map.png' },
+        { name: 'IN印度', regex: '印度|🇮🇳|in|india', icon: 'India.png' },
+        { name: 'AR阿根廷', regex: '阿根廷|🇦🇷|ar|argentina', icon: 'Argentina.png' },
+        { name: 'RU俄罗斯', regex: '俄罗斯|🇷🇺|ru|russia', icon: 'Russia.png' },
+      ]
+      const existingNames = new Set(state.regions.map((r) => r.name))
+      const nextTpl = extraRegionTemplates.find((tpl) => !existingNames.has(tpl.name))
+      let newRegion
+      if (nextTpl) {
+        newRegion = {
+          name: nextTpl.name,
+          regex: nextTpl.regex,
+          flags: 'i',
+          icon: window.YaNetDefaults.QURE_BASE + nextTpl.icon,
+          enabled: true,
+        }
+      } else {
+        let n = state.regions.length + 1
+        let regName = `R${n}自定义地区`
+        while (existingNames.has(regName)) {
+          n += 1
+          regName = `R${n}自定义地区`
+        }
+        newRegion = {
+          name: regName,
+          regex: 'custom',
+          flags: 'i',
+          icon: window.YaNetDefaults.QURE_BASE + 'World_Map.png',
+          enabled: true,
+        }
+      }
+      state.regions.push(newRegion)
       openRegionIdx = state.regions.length - 1
       recomputePreview()
       renderRegionsSection()
@@ -2301,6 +2837,7 @@
       const [idx, dir] = moveReg.dataset.moveReg.split(':').map(Number)
       const target = idx + dir
       if (target >= 0 && target < state.regions.length) {
+        pushUndo('调整地区顺序')
         const [item] = state.regions.splice(idx, 1)
         state.regions.splice(target, 0, item)
         if (openRegionIdx === idx) openRegionIdx = target
@@ -2313,11 +2850,13 @@
 
     const delReg = t.closest('[data-del-reg]')
     if (delReg) {
-      state.regions.splice(Number(delReg.dataset.delReg), 1)
+      const idx = Number(delReg.dataset.delReg)
+      pushUndo(`删除地区「${state.regions[idx]?.name || ''}」`)
+      state.regions.splice(idx, 1)
       openRegionIdx = -1
       recomputePreview()
       renderRegionsSection()
-      showToast('已删除地区分组')
+      showToast('已删除地区分组（可点击顶栏撤销）')
       return
     }
 
@@ -2345,6 +2884,7 @@
     }
 
     if (t.closest('#btn-reset-sample-nodes')) {
+      pushUndo('恢复默认示例节点')
       state.sampleNodesText = window.YaNetDefaults.SAMPLE_NODES_TEXT
       recomputePreview()
       renderNodesSection()
@@ -2378,6 +2918,7 @@
           ? list[openRegionIdx]
           : null
 
+    pushUndo(`调整「${list[fromIdx]?.name || ''}」排序`)
     const [moved] = list.splice(fromIdx, 1)
     list.splice(insertIdx, 0, moved)
 
@@ -2479,6 +3020,30 @@
   })
 
   // ===== Topbar Actions =====
+  if (elBtnUndo) {
+    elBtnUndo.addEventListener('click', performUndo)
+  }
+
+  if (elBtnTheme) {
+    elBtnTheme.addEventListener('click', toggleTheme)
+  }
+
+  if (elBtnShareUrl) {
+    elBtnShareUrl.addEventListener('click', async () => {
+      try {
+        const payload = await encodeStateToSharePayload(state)
+        const base =
+          typeof location !== 'undefined' && location.origin && location.origin !== 'null'
+            ? location.origin + location.pathname
+            : 'https://yibiner.github.io/clash-verge-rule-studio/'
+        const shareUrl = `${base}#cfg=${payload}`
+        await copyText(shareUrl, `配置分享链接 (${shareUrl.length} 字符)`)
+      } catch (err) {
+        showToast('生成分享链接失败：' + (err?.message || String(err)))
+      }
+    })
+  }
+
   document.getElementById('btn-copy-js').addEventListener('click', () => {
     copyText(lastScriptCode, ' global_script.js')
   })
@@ -2493,13 +3058,15 @@
 
   document.getElementById('btn-reset').addEventListener('click', () => {
     if (!confirm('确定恢复为默认分流规则配置吗？当前所有修改将被覆盖。')) return
+    pushUndo('重置为默认配置')
     state = createDefaultState()
     openServiceIdx = -1
+    openServiceOriginalName = ''
     openRegionIdx = -1
     simulatedSelections = {}
     recomputePreview()
     renderEditor()
-    showToast('已恢复默认配置')
+    showToast('已恢复默认配置（可点击顶栏撤销）')
   })
 
   // Import Modal
@@ -2536,8 +3103,11 @@
       return
     }
     try {
-      state = parseExistingScript(raw)
+      const nextState = parseExistingScript(raw)
+      pushUndo('导入外部配置')
+      state = nextState
       openServiceIdx = -1
+      openServiceOriginalName = ''
       openRegionIdx = -1
       recomputePreview()
       renderEditor()
@@ -2570,14 +3140,44 @@
     closeIconPicker()
   })
 
+  // About Modal Events
+  function closeAboutModal() {
+    if (elAboutModal) elAboutModal.classList.add('hidden')
+  }
+  if (elBtnAbout && elAboutModal) {
+    elBtnAbout.addEventListener('click', () => {
+      elAboutModal.classList.remove('hidden')
+    })
+    const btnAboutClose = document.getElementById('about-modal-close')
+    const btnAboutOk = document.getElementById('about-modal-ok')
+    if (btnAboutClose) btnAboutClose.addEventListener('click', closeAboutModal)
+    if (btnAboutOk) btnAboutOk.addEventListener('click', closeAboutModal)
+    elAboutModal.addEventListener('click', (e) => {
+      if (e.target === elAboutModal) closeAboutModal()
+    })
+  }
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       closeIconPicker()
       closeImportModal()
+      closeAboutModal()
+      return
+    }
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+      const tag = e.target && e.target.tagName ? e.target.tagName.toLowerCase() : ''
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable) return
+      if (undoStack.length > 0) {
+        e.preventDefault()
+        performUndo()
+      }
     }
   })
 
   // ===== Boot =====
+  applyTheme(getPreferredTheme())
+  updateUndoButton()
   recomputePreview()
   renderEditor()
+  loadStateFromUrlHash()
 })()
