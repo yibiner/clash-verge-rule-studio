@@ -489,6 +489,7 @@
         <div class="chip-group">
           <button class="chip" data-svc-preset="all">全部开启</button>
           <button class="chip" data-svc-preset="daily">日常精简</button>
+          <button class="chip" data-svc-preset="devLean">开发精简</button>
           <button class="chip" data-svc-preset="dev">仅 AI + 谷歌 + 开发</button>
           <button class="chip" data-svc-preset="none">全部关闭</button>
         </div>
@@ -2150,6 +2151,36 @@
       const p = svcPreset.dataset.svcPreset
       const dailyKeys = new Set(['openai', ...FOREIGN_AI_SPLIT_KEYS, 'youtube', 'netflix', 'telegram', 'ads', 'apple', 'google', 'github', 'microsoft'])
       const devKeys = new Set(['openai', ...FOREIGN_AI_SPLIT_KEYS, 'google', 'github', 'microsoft', 'ads'])
+      const devLeanEnabled = new Set([
+        'ai_cursor', 'ai_gemini', 'ai_openai', 'ai_claude', 'ai_grok', 'ai_other',
+        'youtube', 'google', 'github', 'microsoft', 'apple', 'whatsapp', 'telegram', 'line',
+        'spotify', 'biliintl', 'tiktok', 'mediaHMT', 'games', 'ads',
+      ])
+      const devLeanOrder = [
+        'ai_cursor', 'ai_gemini', 'ai_openai', 'ai_claude', 'ai_grok', 'ai_copilot', 'ai_other',
+        'youtube', 'google', 'github', 'microsoft', 'apple', 'whatsapp', 'telegram', 'line',
+        'spotify', 'biliintl', 'tiktok', 'mediaHMT', 'games', 'ads',
+        'bahamut', 'netflix', 'disney', 'pixiv', 'hbo', 'primevideo', 'hulu', 'japan',
+      ]
+      const sgFirstKeys = new Set(['ai_cursor', 'ai_gemini', 'ai_openai', 'ai_claude', 'ai_grok', 'ai_other'])
+      if (p === 'devLean') {
+        state.services.forEach((s) => {
+          s.enabled = devLeanEnabled.has(s.key)
+          if (sgFirstKeys.has(s.key)) s.preferRegion = 'SG'
+        })
+        const rank = new Map(devLeanOrder.map((key, index) => [key, index]))
+        const known = []
+        const rest = []
+        state.services.forEach((s) => (rank.has(s.key) ? known : rest).push(s))
+        known.sort((a, b) => rank.get(a.key) - rank.get(b.key))
+        state.services = [...known, ...rest]
+        state.systemGroups.defaultGroup.preferRegion = 'SG'
+        openServiceIdx = -1
+        recomputePreview()
+        renderServicesSection()
+        showToast('已应用「开发精简」：YouTube 在谷歌服务前，AI 与默认节点优先新加坡')
+        return
+      }
       state.services.forEach((s) => {
         if (p === 'all') s.enabled = true
         else if (p === 'none') s.enabled = false

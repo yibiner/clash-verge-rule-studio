@@ -189,6 +189,9 @@
         if (svc.directFirst) {
           lines.push(`    directFirst: true,`)
         }
+        if (svc.preferRegion) {
+          lines.push(`    preferRegion: ${jsStr(svc.preferRegion)},`)
+        }
         lines.push('  },')
         return lines.join('\n')
       })
@@ -616,6 +619,16 @@ function main(config) {
 
   const regionGroupNames = generatedRegionGroups.map((g) => g.name).sort()
 
+  function preferRegionFirst(list, prefix) {
+    const tag = String(prefix || '')
+    if (!tag) return list
+    const hit = list.find((name) => String(name).substring(0, tag.length) === tag)
+    if (!hit) return list
+    return [hit, ...list.filter((name) => name !== hit)]
+  }
+
+  const sgFirstKeys = new Set(['ai_cursor', 'ai_gemini', 'ai_openai', 'ai_claude', 'ai_grok', 'ai_other'])
+
   if (otherProxies.length > 0) {
     generatedRegionGroups.push({
       ...groupBaseOption,
@@ -633,7 +646,7 @@ function main(config) {
     ...groupBaseOption,
     name: ${jsStr(names.default)},
     type: ${jsStr(systemGroups.defaultGroup.type || 'select')},
-    proxies: ${buildProxiesArrayExpr(systemGroups.defaultGroup.proxies, names)},
+    proxies: preferRegionFirst(${buildProxiesArrayExpr(systemGroups.defaultGroup.proxies, names)}, ${jsStr(systemGroups.defaultGroup.preferRegion ?? 'SG')}),
     icon: ${jsStr(systemGroups.defaultGroup.icon || '')},
   })
 
@@ -654,12 +667,16 @@ function main(config) {
       }
 
       let groupProxies
+      const preferPrefix = svc.preferRegion || (sgFirstKeys.has(svc.key) ? 'SG' : '')
       if (svc.reject) {
         groupProxies = [${jsStr(names.reject)}, ${jsStr(names.direct)}, ${jsStr(names.default)}]
       } else if (svc.directFirst || svc.key === 'biliintl' || svc.key === 'bahamut') {
         groupProxies = [${jsStr(names.default)}, ${jsStr(names.direct)}, ...regionGroupNames]
       } else {
         groupProxies = [${jsStr(names.default)}, ...regionGroupNames, ${jsStr(names.direct)}]
+      }
+      if (!svc.reject && preferPrefix) {
+        groupProxies = preferRegionFirst(groupProxies, preferPrefix)
       }
 
       functionalGroups.push({
@@ -988,6 +1005,7 @@ ${fallbackRulesLines}
           url: svc.url || '',
           reject: Boolean(svc.reject),
           directFirst: Boolean(svc.directFirst || svc.key === 'biliintl' || svc.key === 'bahamut'),
+          preferRegion: svc.preferRegion || '',
           rules: Array.isArray(svc.rules) ? [...svc.rules] : [],
           providers: Array.isArray(svc.providers) ? svc.providers.map((p) => ({ ...p })) : [],
         }))
