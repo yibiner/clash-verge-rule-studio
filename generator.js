@@ -218,10 +218,12 @@
     const effectiveMode = args.mode === 'custom' ? '' : args.mode
 
     return `/***
- * Clash Verge Rev / Mihomo Party 优化脚本
- * 原作者: dahaha-365 (YaNet)
- * Github：https://github.com/dahaha-365/YaNet
- * 由本地可视化编辑器生成
+ * Clash Verge Rev / Mihomo Party 分流规则脚本
+ * 由 Clash Verge 分流规则工作台生成
+ * https://github.com/yibiner/clash-verge-rule-studio
+ *
+ * 规则结构参考 dahaha-365/YaNet
+ * https://github.com/dahaha-365/YaNet
  */
 
 function stringToArray(val) {
