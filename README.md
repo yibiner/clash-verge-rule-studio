@@ -9,6 +9,7 @@
 
 - **可视化全量配置**：覆盖基础开关与高倍率节点过滤、服务分流策略组、地区自动分组（URLTest）、系统策略组、DNS 模式与分流策略、内置/关联 `rule-providers`，以及端口、TUN、Sniffer、NTP、GeoX 等内核参数。
 - **海外 AI 细分一键预设**：在「服务分流组」支持一键拆分为 `OpenAI`、`Claude`、`Gemini`（含 Google Antigravity）、`Cursor`、`Grok`、`Copilot` 与 `其他国外AI` 兜底组，自动置顶避免被通用规则抢占，也支持一键合并回「国外AI」。
+- **开发精简预设**：按固定开关和顺序启用日常开发分流，YouTube 排在谷歌服务前，默认节点与拆分后的国外 AI 组优先新加坡；`downloads.cursor.com` 直连，其余 Cursor 域名仍走代理。对应脚本见 [`presets/dev-lean/global_script.js`](presets/dev-lean/global_script.js)。
 - **拖拽排序**：服务分流组与地区分组支持按住左侧手柄拖拽调整顺序，实时同步规则优先级与代理组展示顺序。
 - **真实执行预览**：内置模拟订阅节点并在浏览器中直接运行生成的 `main(config)`，实时预览 Clash Verge 风格代理组、分流规则、最终 YAML 与生成的 `global_script.js`。
 - **导入与本地存储**：支持导入已有 `global_script.js` 或 JSON 配置备份；所有配置仅存储在当前浏览器的 `localStorage`，不经过任何后端服务器。
@@ -43,7 +44,10 @@ clash-verge-rule-studio/
 ├── defaults.js     # 默认配置、Qure 图标列表与海外 AI 细分预设
 ├── generator.js    # global_script.js 代码生成、沙箱预览执行、YAML 序列化与脚本解析
 ├── app.js          # 交互状态管理、拖拽排序与实时预览渲染
-└── favicon.svg     # 站点图标
+├── favicon.svg     # 站点图标
+└── presets/
+    └── dev-lean/
+        └── global_script.js   # 「开发精简」预设导出的脚本快照
 ```
 
 ## 致谢

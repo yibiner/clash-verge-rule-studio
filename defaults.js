@@ -949,6 +949,99 @@
 
   const FOREIGN_AI_SPLIT_KEYS = ['ai_openai', 'ai_claude', 'ai_gemini', 'ai_cursor', 'ai_grok', 'ai_copilot', 'ai_other']
 
+  const DEV_LEAN_ENABLED = [
+    'ai_cursor',
+    'ai_gemini',
+    'ai_openai',
+    'ai_claude',
+    'ai_grok',
+    'ai_other',
+    'youtube',
+    'google',
+    'github',
+    'microsoft',
+    'apple',
+    'whatsapp',
+    'telegram',
+    'line',
+    'spotify',
+    'biliintl',
+    'tiktok',
+    'mediaHMT',
+    'games',
+    'ads',
+  ]
+
+  const DEV_LEAN_ORDER = [
+    'ai_cursor',
+    'ai_gemini',
+    'ai_openai',
+    'ai_claude',
+    'ai_grok',
+    'ai_copilot',
+    'ai_other',
+    'youtube',
+    'google',
+    'github',
+    'microsoft',
+    'apple',
+    'whatsapp',
+    'telegram',
+    'line',
+    'spotify',
+    'biliintl',
+    'tiktok',
+    'mediaHMT',
+    'games',
+    'ads',
+    'bahamut',
+    'netflix',
+    'disney',
+    'pixiv',
+    'hbo',
+    'primevideo',
+    'hulu',
+    'japan',
+  ]
+
+  const SG_FIRST_KEYS = ['ai_cursor', 'ai_gemini', 'ai_openai', 'ai_claude', 'ai_grok', 'ai_other']
+
+  function applyDevLeanPreset(state) {
+    const hasSplit = state.services.some((s) => FOREIGN_AI_SPLIT_KEYS.includes(s.key))
+    if (!hasSplit) {
+      state.services = state.services.filter((s) => s.key !== 'openai')
+      state.services.unshift(...createForeignAiSplitPreset())
+    }
+
+    const enabled = new Set(DEV_LEAN_ENABLED)
+    const sgFirst = new Set(SG_FIRST_KEYS)
+    state.services.forEach((s) => {
+      s.enabled = enabled.has(s.key)
+      if (sgFirst.has(s.key)) s.preferRegion = 'SG'
+    })
+
+    const rank = new Map(DEV_LEAN_ORDER.map((key, index) => [key, index]))
+    const known = []
+    const rest = []
+    state.services.forEach((s) => (rank.has(s.key) ? known : rest).push(s))
+    known.sort((a, b) => rank.get(a.key) - rank.get(b.key))
+    state.services = [...known, ...rest]
+
+    if (state.systemGroups && state.systemGroups.defaultGroup) {
+      state.systemGroups.defaultGroup.preferRegion = 'SG'
+    }
+
+    const directName = (state.builtinProxies && state.builtinProxies.directName) || '直连'
+    const directRule = 'DOMAIN,downloads.cursor.com,' + directName
+    const cursor = state.services.find((s) => s.key === 'ai_cursor')
+    if (cursor) {
+      const restRules = (cursor.rules || []).filter((rule) => !/downloads\.cursor\.com/i.test(String(rule)))
+      cursor.rules = [directRule, ...restRules]
+    }
+
+    return state
+  }
+
   global.YaNetDefaults = {
     QURE_BASE,
     QURE_ICONS,
@@ -960,5 +1053,6 @@
     mergeStateWithDefaults,
     createForeignAiSplitPreset,
     createMergedForeignAiService,
+    applyDevLeanPreset,
   }
 })(window)

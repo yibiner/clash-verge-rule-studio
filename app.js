@@ -10,6 +10,7 @@
     mergeStateWithDefaults,
     createForeignAiSplitPreset,
     createMergedForeignAiService,
+    applyDevLeanPreset,
   } = window.YaNetDefaults
   const { generateGlobalScript, executeScriptPreview, toYaml, parseExistingScript } = window.YaNetGenerator
 
@@ -2151,34 +2152,12 @@
       const p = svcPreset.dataset.svcPreset
       const dailyKeys = new Set(['openai', ...FOREIGN_AI_SPLIT_KEYS, 'youtube', 'netflix', 'telegram', 'ads', 'apple', 'google', 'github', 'microsoft'])
       const devKeys = new Set(['openai', ...FOREIGN_AI_SPLIT_KEYS, 'google', 'github', 'microsoft', 'ads'])
-      const devLeanEnabled = new Set([
-        'ai_cursor', 'ai_gemini', 'ai_openai', 'ai_claude', 'ai_grok', 'ai_other',
-        'youtube', 'google', 'github', 'microsoft', 'apple', 'whatsapp', 'telegram', 'line',
-        'spotify', 'biliintl', 'tiktok', 'mediaHMT', 'games', 'ads',
-      ])
-      const devLeanOrder = [
-        'ai_cursor', 'ai_gemini', 'ai_openai', 'ai_claude', 'ai_grok', 'ai_copilot', 'ai_other',
-        'youtube', 'google', 'github', 'microsoft', 'apple', 'whatsapp', 'telegram', 'line',
-        'spotify', 'biliintl', 'tiktok', 'mediaHMT', 'games', 'ads',
-        'bahamut', 'netflix', 'disney', 'pixiv', 'hbo', 'primevideo', 'hulu', 'japan',
-      ]
-      const sgFirstKeys = new Set(['ai_cursor', 'ai_gemini', 'ai_openai', 'ai_claude', 'ai_grok', 'ai_other'])
       if (p === 'devLean') {
-        state.services.forEach((s) => {
-          s.enabled = devLeanEnabled.has(s.key)
-          if (sgFirstKeys.has(s.key)) s.preferRegion = 'SG'
-        })
-        const rank = new Map(devLeanOrder.map((key, index) => [key, index]))
-        const known = []
-        const rest = []
-        state.services.forEach((s) => (rank.has(s.key) ? known : rest).push(s))
-        known.sort((a, b) => rank.get(a.key) - rank.get(b.key))
-        state.services = [...known, ...rest]
-        state.systemGroups.defaultGroup.preferRegion = 'SG'
+        applyDevLeanPreset(state)
         openServiceIdx = -1
         recomputePreview()
         renderServicesSection()
-        showToast('已应用「开发精简」：YouTube 在谷歌服务前，AI 与默认节点优先新加坡')
+        showToast('已应用「开发精简」：downloads.cursor.com 直连，YouTube 在谷歌服务前，AI 与默认节点优先新加坡')
         return
       }
       state.services.forEach((s) => {
