@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clash Verge 分流规则工作台</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <img src="./favicon.svg" alt="" width="30" height="30" />
+        </div>
+        <div>
+          <div class="brand-title">Clash Verge 分流规则工作台</div>
+        </div>
+        <div id="run-status" class="topbar-status">
+          <span class="dot"></span>
+          <span id="run-status-text">实时运行正常</span>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <button id="btn-import" class="btn" title="导入已有的 global_script.js 或 JSON 配置">导入脚本</button>
+        <button id="btn-export-json" class="btn" title="备份当前编辑器配置为 JSON">备份 JSON</button>
+        <button id="btn-reset" class="btn" title="恢复为默认分流规则配置">重置默认</button>
+        <button id="btn-copy-js" class="btn">复制 JS</button>
+        <button id="btn-download-js" class="btn btn-primary">下载 global_script.js</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="sidebar">
+        <nav class="nav-list" id="nav-list" aria-label="配置模块"></nav>
+        <div class="sidebar-footer">
+          <div class="sidebar-meta">
+            纯本地零依赖运行，修改自动保存在浏览器中。右侧预览通过真实执行 <code>main(config)</code> 生成。
+          </div>
+        </div>
+      </aside>
+
+      <section class="editor-pane" id="editor-pane" aria-label="可视化配置编辑区"></section>
+
+      <section class="preview-pane" aria-label="Clash Verge 实时效果预览">
+        <div class="preview-tabs-bar">
+          <div class="tab-pills" id="preview-tabs" role="tablist">
+            <button class="tab-pill active" data-tab="groups" role="tab">代理组预览</button>
+            <button class="tab-pill" data-tab="rules" role="tab">分流规则</button>
+            <button class="tab-pill" data-tab="yaml" role="tab">输出 YAML</button>
+            <button class="tab-pill" data-tab="js" role="tab">生成 JS</button>
+          </div>
+          <div id="preview-extra-actions"></div>
+        </div>
+        <div class="preview-body" id="preview-body"></div>
+      </section>
+    </main>
+
+    <!-- Icon Picker Modal -->
+    <div id="icon-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="icon-modal-title">
+      <div class="modal">
+        <div class="modal-head">
+          <h3 id="icon-modal-title" class="modal-title">选择 Qure 图标</h3>
+          <button id="icon-modal-close" class="icon-btn" aria-label="关闭">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="input-row">
+            <input id="icon-search" class="input" placeholder="搜索图标名称，如 ChatGPT / Netflix / 香港 / GitHub..." />
+            <div class="chip-group" id="icon-cats"></div>
+          </div>
+          <div id="icon-grid" class="icon-grid"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Import Script Modal -->
+    <div id="import-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="import-modal-title">
+      <div class="modal">
+        <div class="modal-head">
+          <h3 id="import-modal-title" class="modal-title">导入 global_script.js 或配置备份</h3>
+          <button id="import-modal-close" class="icon-btn" aria-label="关闭">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="field" style="margin-bottom: 12px">
+            <label>
+              选择本地文件（.js / .json）
+              <span class="field-hint">支持直接导入 YaNet/Mihomo/global_script.js</span>
+            </label>
+            <input id="import-file-input" type="file" accept=".js,.json,.txt" class="input" />
+          </div>
+          <div class="field">
+            <label>
+              或直接粘贴脚本内容
+              <span class="field-hint">提示：解析 JS 会执行脚本顶层代码，请仅导入信任的脚本</span>
+            </label>
+            <textarea id="import-textarea" class="textarea mono" rows="12" placeholder="在此粘贴 global_script.js 或之前导出的 JSON 备份内容..."></textarea>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button id="import-cancel" class="btn">取消</button>
+          <button id="import-confirm" class="btn btn-primary">解析并导入</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script defer src="./defaults.js"></script>
+    <script defer src="./generator.js"></script>
+    <script defer src="./app.js"></script>
+  </body>
+</html>
