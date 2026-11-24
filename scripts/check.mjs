@@ -146,6 +146,40 @@ assert(hitCursorDl.matched && hitCursorDl.matched.target === '直连', 'download
 const hitGemini = YaNetGenerator.simulateRuleMatch('https://gemini.google.com/app', leanPrev.config)
 assert(hitGemini.matched && hitGemini.matched.target === 'Gemini' && hitGemini.chain[1] === 'SG新加坡', 'gemini.google.com routes to Gemini -> SG新加坡')
 
+const antigravityHosts = [
+  'cloudcode-pa.googleapis.com',
+  'daily-cloudcode-pa.googleapis.com',
+  'aicode.googleapis.com',
+  'agentaicode.googleapis.com',
+  'businessaicode.googleapis.com',
+  'aiplatform.googleapis.com',
+  'us-central1-aiplatform.rep.googleapis.com',
+  'generativelanguage.googleapis.com',
+  'accounts.google.com',
+  'oauth2.googleapis.com',
+  'oauth2.mtls.googleapis.com',
+  'www.googleapis.com',
+  'www.mtls.googleapis.com',
+  'auth.cloud.google',
+  'sts.googleapis.com',
+  'iamcredentials.googleapis.com',
+  'antigravity.google',
+  'ide.antigravity.google',
+  'antigravity-hub-auto-updater-974169037036.us-central1.run.app',
+  'antigravity-ide-auto-updater-974169037036.us-central1.run.app',
+  'storage.googleapis.com',
+  'fonts.googleapis.com',
+  'fonts.gstatic.com',
+]
+for (const host of antigravityHosts) {
+  const hit = YaNetGenerator.simulateRuleMatch(host, leanPrev.config)
+  assert(hit.matched && hit.matched.target === 'Gemini', `${host} routes to Gemini, got ${hit.matched && hit.matched.target}`)
+}
+const sandboxHit = YaNetGenerator.simulateRuleMatch('daily-cloudcode-pa.sandbox.googleapis.com', leanPrev.config)
+assert(!(sandboxHit.matched && sandboxHit.matched.target === 'Gemini'), 'sandbox googleapis host stays out of Gemini')
+const mapsHit = YaNetGenerator.simulateRuleMatch('maps.googleapis.com', leanPrev.config)
+assert(!(mapsHit.matched && mapsHit.matched.target === 'Gemini'), 'maps.googleapis.com stays out of Gemini')
+
 const hitSsh = YaNetGenerator.simulateRuleMatch('port:22', leanPrev.config)
 assert(hitSsh.matched && hitSsh.matched.type === 'DST-PORT' && hitSsh.matched.target === '直连', 'port:22 matches DST-PORT 直连')
 
