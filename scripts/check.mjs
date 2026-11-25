@@ -181,7 +181,13 @@ const mapsHit = YaNetGenerator.simulateRuleMatch('maps.googleapis.com', leanPrev
 assert(!(mapsHit.matched && mapsHit.matched.target === 'Gemini'), 'maps.googleapis.com stays out of Gemini')
 
 const hitX = YaNetGenerator.simulateRuleMatch('x.com', leanPrev.config)
-assert(hitX.matched && hitX.matched.target === 'X', 'x.com routes to X')
+assert(hitX.matched && hitX.matched.target === '社交媒体', 'dev-lean merges X into 社交媒体')
+assert(
+  stLean.services.filter((svc) => svc.enabled).map((svc) => svc.key).join(';') ===
+    'ai_cursor;ai_gemini;ai_openai;ai_claude;ai_grok;ai_other;github;microsoft;apple;social;games;netease;tiktok;ads;youtube;google',
+  'dev-lean enabled order matches the saved grouping'
+)
+assert(!stLean.services.some((svc) => ['discord', 'x', 'whatsapp', 'telegram', 'line', 'steam'].includes(svc.key)), 'dev-lean does not keep split social or Steam groups')
 const hitGrokX = YaNetGenerator.simulateRuleMatch('grok.x.com', leanPrev.config)
 assert(hitGrokX.matched && hitGrokX.matched.target === 'Grok', 'grok.x.com stays on Grok, ahead of X')
 const hitNetease = YaNetGenerator.simulateRuleMatch('music.163.com', leanPrev.config)
@@ -199,9 +205,9 @@ const neteaseIdx = leanRules.findIndex((rule) => rule.startsWith('DOMAIN-SUFFIX,
 const appleBeforeAds = leanRules.findIndex((rule) => rule.startsWith('GEOSITE,apple-cn,直连'))
 assert(neteaseIdx >= 0 && neteaseIdx < adsIdx, 'NetEase rules precede the ad block')
 assert(appleBeforeAds >= 0 && appleBeforeAds < adsIdx, 'Apple rules precede the ad block')
-assert(leanRules.some((rule) => rule === 'GEOSITE,discord,Discord'), 'Discord geosite rule is present')
-assert(leanRules.some((rule) => rule === 'GEOSITE,steam@cn,直连'), 'Steam CN rule is direct')
-assert(leanRules.some((rule) => rule === 'GEOSITE,steam,Steam'), 'Steam geosite rule is present')
+assert(leanRules.some((rule) => rule === 'GEOSITE,discord,社交媒体'), 'merged social keeps the Discord rule')
+assert(leanRules.some((rule) => rule === 'GEOSITE,steam@cn,直连'), 'merged games keeps Steam CN direct')
+assert(leanRules.some((rule) => rule === 'GEOSITE,steam,游戏专用'), 'merged games sends Steam through 游戏专用')
 assert(!leanRules.some((rule) => rule.includes('日本网站') || rule.includes('GEOIP,jp')), 'Japan group is removed')
 assert(!stLean.services.some((svc) => svc.key === 'japan'), 'Japan service is absent from dev-lean')
 
@@ -245,6 +251,7 @@ assert(resetLeanKeys.indexOf('apple') < resetLeanKeys.indexOf('ads'), 'media spl
 
 // Moving games before steam triggers shadow-games and repair fixes it
 const stGamesOrder = YaNetDefaults.applyDevLeanPreset(YaNetDefaults.createDefaultState())
+YaNetDefaults.applyServiceBundle(stGamesOrder, 'games', 'split')
 const gamesIdx = stGamesOrder.services.findIndex((svc) => svc.key === 'games')
 const steamIdx = stGamesOrder.services.findIndex((svc) => svc.key === 'steam')
 const [movedGames] = stGamesOrder.services.splice(gamesIdx, 1)

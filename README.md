@@ -19,7 +19,7 @@
 - **默认尊重 Clash Verge 接管字段**：默认不写入端口、`allow-lan`、`ipv6`（含 `dns.ipv6`）、`mode`、`unified-delay`、`external-controller`、`secret` 及 TUN 常规配置，避免覆盖 Clash Verge 设置页；需要给 Mihomo Party 或纯 Mihomo 内核使用时，可在「内核与 TUN」顶部一键开启写入。
 - **服务分组「细分与合并」与开发精简预设**：
   - **五大分组一键拆合**：支持对 **海外 AI**（`OpenAI`、`Claude`、`Gemini` 含 Google Antigravity、`Cursor`、`Grok`、`Copilot`、`其他国外AI`）、**流媒体**（`YouTube`、`Netflix`、`Disney+`、港澳台等 12 组）、**社交**（`Telegram`、`WhatsApp`、`Line`、`Discord`、`X`）、**游戏**（`Steam`、`游戏专用`）、**微软与 Github** 按需一键拆分或合并；苹果（`apple-cn` 直连 + 国际代理）、谷歌、广告过滤、网易云音乐保持独立单组。
-  - **开发精简预设**：开启常用开发、AI、社交、流媒体与网易云音乐分流，默认节点与海外 AI 优先新加坡（`SG`）；`downloads.cursor.com` 直连，其余 Cursor 域名走代理；自动排好广告过滤、YouTube 与谷歌服务顺序。对应导出快照见 [`presets/dev-lean/global_script.js`](presets/dev-lean/global_script.js)。
+  - **开发精简预设**：海外 AI、Github、微软、流媒体保持拆开，社交合并为「社交媒体」，游戏合并为「游戏专用」。启用顺序为 Cursor、Gemini、OpenAI、Claude、Grok、其他国外 AI、Github、微软、苹果、社交媒体、游戏专用、网易云音乐、TikTok、广告过滤、YouTube、谷歌服务。默认节点与海外 AI 优先新加坡（`SG`）；`downloads.cursor.com` 直连。对应导出快照见 [`presets/dev-lean/global_script.js`](presets/dev-lean/global_script.js)。
 - **优先地区可视化配置**：支持为「默认节点」及任意服务分流组单独指定优先置顶地区（`preferRegion`），并支持服务组改名后一键同步规则目标。
 - **拖拽排序与顺序冲突一键修复**：服务分流组与地区分组均支持拖拽排序并严格保留顺序；自动检测服务组间规则抢占冲突（广告/谷歌/YouTube、细分 AI/兜底组、Grok/X、Copilot/微软与 Github、Steam/游戏专用），在卡片与顶部提示并支持**一键调整顺序**。
 - **真实执行预览、静态诊断与命中模拟**：

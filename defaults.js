@@ -1235,24 +1235,16 @@
     'ai_claude',
     'ai_grok',
     'ai_other',
-    'ads',
-    'youtube',
-    'google',
     'github',
     'microsoft',
     'apple',
-    'discord',
-    'x',
-    'steam',
-    'netease',
-    'whatsapp',
-    'telegram',
-    'line',
-    'spotify',
-    'biliintl',
-    'tiktok',
-    'mediaHMT',
+    'social',
     'games',
+    'netease',
+    'tiktok',
+    'ads',
+    'youtube',
+    'google',
   ]
 
   const DEV_LEAN_ORDER = [
@@ -1266,21 +1258,16 @@
     'github',
     'microsoft',
     'apple',
-    'discord',
-    'x',
-    'steam',
-    'netease',
-    'whatsapp',
-    'telegram',
-    'line',
-    'spotify',
-    'biliintl',
-    'tiktok',
-    'mediaHMT',
+    'social',
     'games',
+    'netease',
+    'tiktok',
     'ads',
     'youtube',
     'google',
+    'mediaHMT',
+    'biliintl',
+    'spotify',
     'bahamut',
     'netflix',
     'disney',
@@ -1289,6 +1276,8 @@
     'primevideo',
     'hulu',
   ]
+
+  const DEV_LEAN_MERGED_BUNDLES = new Set(['social', 'games'])
 
   const SERVICE_ORDER_RULES = [
     {
@@ -1399,6 +1388,12 @@
     const catalog = new Map(createDefaultState().services.map((s) => [s.key, s]))
     for (const bundle of SERVICE_BUNDLES) {
       if (bundle.id === 'ai') continue
+      if (DEV_LEAN_MERGED_BUNDLES.has(bundle.id)) {
+        if (isBundleSplit(state.services, bundle) || !state.services.some((svc) => svc.key === bundle.mergedKey)) {
+          applyServiceBundle(state, bundle.id, 'merge')
+        }
+        continue
+      }
       if (!isBundleSplit(state.services, bundle)) {
         applyServiceBundle(state, bundle.id, 'split')
       } else if (!bundle.splitKeys.includes(bundle.mergedKey)) {
