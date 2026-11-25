@@ -8,12 +8,15 @@
     QURE_ICONS,
     DNS_MODES,
     FOREIGN_AI_SPLIT_KEYS,
+    SERVICE_BUNDLES,
     SAMPLE_NODES_TEXT,
     createDefaultState,
     mergeStateWithDefaults,
-    createForeignAiSplitPreset,
-    createMergedForeignAiService,
     applyDevLeanPreset,
+    applyServiceBundle,
+    isBundleSplit,
+    serviceOrderViolations,
+    repairServiceOrder,
   } = window.YaNetDefaults
   const {
     generateGlobalScript,
@@ -36,6 +39,8 @@
   let openServiceIdx = -1
   let openServiceOriginalName = ''
   let openRegionIdx = -1
+  let bundlesOpen = false
+  let bundleInfoId = ''
   let dragState = null
   let expandedPreviewGroups = new Set(['默认节点'])
   let simulatedSelections = {} // groupName -> proxyName
@@ -331,8 +336,9 @@
     lastPreviewResult = executeScriptPreview(lastScriptCode, state.sampleNodesText, state)
     lastDiagnostics = diagnoseConfig(state, lastPreviewResult)
 
-    const errorCount = lastDiagnostics.filter((d) => d.level === 'error').length
-    const warnCount = lastDiagnostics.filter((d) => d.level === 'warn').length
+    const statusDiagnostics = lastDiagnostics.filter((item) => !String(item.code || '').startsWith('shadow-'))
+    const errorCount = statusDiagnostics.filter((d) => d.level === 'error').length
+    const warnCount = statusDiagnostics.filter((d) => d.level === 'warn').length
 
     if (lastPreviewResult.ok) {
       elRunStatus.classList.toggle('is-error', errorCount > 0)
@@ -579,7 +585,25 @@
     return keyFreq
   }
 
-  function renderServiceTitleInner(svc, keyFreq) {
+  function describeServiceOrderHint(svc, violations) {
+    if (!svc || !svc.enabled) return ''
+    const key = svc.key
+    const list = violations || serviceOrderViolations(state.services)
+    const related = list.filter((item) => item.earlierKey === key || item.laterKey === key)
+    if (!related.length) return ''
+    const notes = related.map((item) => {
+      if (item.earlierKey === key) {
+        const other = state.services.find((s) => s.enabled && s.key === item.laterKey)
+        return `排在「${other?.name || item.laterKey}」后面`
+      }
+      const other = state.services.find((s) => s.enabled && s.key === item.earlierKey)
+      return `排在「${other?.name || item.earlierKey}」前面`
+    })
+    const impacts = [...new Set(related.map((item) => String(item.reason || '').trim()).filter(Boolean))]
+    return `${[...new Set(notes)].join('，')}。${impacts.join('')}`
+  }
+
+  function renderServiceTitleInner(svc, keyFreq, violations) {
     const ruleCount = (svc.rules || []).filter((r) => r.trim()).length
     const provCount = (svc.providers || []).length
     const trimmedKey = String(svc.key || '').trim()
@@ -595,7 +619,44 @@
         ${provCount > 0 ? `<span class="pill pill-blue">${provCount} 规则集</span>` : ''}
       </div>
       <div class="entity-sub">key: ${esc(svc.key)} · ${esc((svc.rules || [])[0] || '无规则')}</div>
+      ${renderServiceOrderHint(svc, violations)}
     `
+  }
+
+  function renderServiceOrderHint(svc, violations) {
+    const text = describeServiceOrderHint(svc, violations)
+    if (!text) return ''
+    return `<div class="entity-order-hint is-warn"><span>${esc(text)}</span><button type="button" class="entity-order-fix" data-fix-service-order>调整顺序</button></div>`
+  }
+
+  function renderServiceOrderSummaryBanner(violations) {
+    const list = violations || serviceOrderViolations(state.services)
+    if (!list.length) return ''
+    const first = list[0]
+    const extra = list.length > 1 ? ` 等 ${list.length} 处` : ''
+    return `
+      <div class="order-warn-bar">
+        <span>顺序冲突：${esc(first.message)}${esc(extra)}</span>
+        <button type="button" class="btn btn-sm" data-fix-service-order>一键调整顺序</button>
+      </div>
+    `
+  }
+
+  function fixServiceOrder() {
+    const openItem = openServiceIdx >= 0 ? state.services[openServiceIdx] : null
+    pushUndo('一键调整服务组顺序')
+    state.services = repairServiceOrder(state.services)
+    openServiceIdx = openItem ? state.services.indexOf(openItem) : -1
+    recomputePreview()
+    renderServicesSection()
+    const left = serviceOrderViolations(state.services)
+    showToast(left.length ? '仍有顺序问题，请再看提示' : '已调整顺序')
+  }
+
+  function toastServiceOrder(name, key) {
+    const svc = state.services.find((s) => s.enabled && s.key === key)
+    const hint = describeServiceOrderHint(svc)
+    showToast(hint ? `已调整「${name}」：${hint}` : `已调整「${name}」排序`)
   }
 
   function renderRegionPrefixOptions(selectedPrefix) {
@@ -635,12 +696,15 @@
 
   function refreshServiceCardHeaders() {
     const keyFreq = buildServiceKeyFreq()
+    const violations = serviceOrderViolations(state.services)
     elEditor.querySelectorAll('.entity-card[data-drag-type="service"]').forEach((card) => {
       const idx = Number(card.dataset.dragIdx)
       const svc = state.services[idx]
       const wrap = card.querySelector('.entity-title-wrap')
-      if (svc && wrap) wrap.innerHTML = renderServiceTitleInner(svc, keyFreq)
+      if (svc && wrap) wrap.innerHTML = renderServiceTitleInner(svc, keyFreq, violations)
     })
+    const orderBanner = document.getElementById('service-order-banner-wrap')
+    if (orderBanner) orderBanner.innerHTML = renderServiceOrderSummaryBanner(violations)
   }
 
   function renderRegionTitleInner(reg, stat) {
@@ -671,9 +735,10 @@
     })
   }
 
-  function renderServicesListMarkup() {
+  function renderServicesListMarkup(precomputedViolations) {
     const query = serviceSearch.trim().toLowerCase()
     const keyFreq = buildServiceKeyFreq()
+    const violations = precomputedViolations || serviceOrderViolations(state.services)
     const filtered = state.services
       .map((svc, idx) => ({ svc, idx }))
       .filter(({ svc }) => {
@@ -699,7 +764,7 @@
               <div class="entity-head-main" data-toggle-svc-open="${idx}">
                 <div class="entity-icon">${renderIconThumb(svc.icon, svc.name)}</div>
                 <div class="entity-title-wrap">
-                  ${renderServiceTitleInner(svc, keyFreq)}
+                  ${renderServiceTitleInner(svc, keyFreq, violations)}
                 </div>
               </div>
               <div class="entity-actions">
@@ -719,45 +784,59 @@
       .join('')
   }
 
-  function renderServicesSection() {
-    const splitKeySet = new Set(FOREIGN_AI_SPLIT_KEYS)
-    const activeSplitCount = state.services.filter((s) => splitKeySet.has(s.key)).length
-    const isAiSplit = activeSplitCount > 0
+  const BUNDLE_KEEP_NOTE = '苹果、谷歌、广告、网易云保持单组。苹果的国内直连和国际代理写在同一组规则里。'
 
+  function renderBundleBar(bundle) {
+    const split = isBundleSplit(state.services, bundle)
+    const present = state.services.filter((svc) => bundle.splitKeys.includes(svc.key)).length
+    const total = bundle.splitKeys.length
+    const status = split ? `已细分 ${present}/${total}` : `合并为「${bundle.mergedName}」`
+    const infoOpen = bundleInfoId === bundle.id
+    return `
+      <div class="bundle-row">
+        <span class="bundle-row-name">${esc(bundle.title)}</span>
+        <span class="bundle-row-status">${esc(status)}</span>
+        <button class="icon-btn bundle-info-btn" type="button" data-bundle-info="${esc(bundle.id)}" title="说明" aria-label="${esc(bundle.title)}说明">i</button>
+        <button class="btn btn-sm ${split ? '' : 'btn-primary'}" type="button" data-bundle-action="split" data-bundle-id="${esc(bundle.id)}">${split ? '重置' : '拆分'}</button>
+        ${split ? `<button class="btn btn-sm" type="button" data-bundle-action="merge" data-bundle-id="${esc(bundle.id)}">合并</button>` : ''}
+      </div>
+      ${infoOpen ? `<div class="bundle-info-pop">${esc(bundle.desc)}</div>` : ''}
+    `
+  }
+
+  function renderBundlePanel() {
+    const summary = SERVICE_BUNDLES.map((bundle) => {
+      const split = isBundleSplit(state.services, bundle)
+      const present = state.services.filter((svc) => bundle.splitKeys.includes(svc.key)).length
+      return split ? `${bundle.title} ${present}/${bundle.splitKeys.length}` : `${bundle.title} 合并`
+    }).join(' · ')
+    const keepOpen = bundleInfoId === 'keep'
+    return `
+      <div class="bundle-fold">
+        <button class="bundle-fold-main" type="button" data-toggle-bundles>
+          <span class="bundle-fold-title">细分与合并</span>
+          <span class="bundle-fold-summary">${esc(summary)}</span>
+          <span class="bundle-fold-caret">${bundlesOpen ? '收起' : '展开'}</span>
+        </button>
+        <button class="icon-btn bundle-info-btn" type="button" data-bundle-info="keep" title="说明" aria-label="单组说明">i</button>
+      </div>
+      ${keepOpen ? `<div class="bundle-info-pop">${esc(BUNDLE_KEEP_NOTE)}</div>` : ''}
+      ${bundlesOpen ? `<div class="bundle-rows">${SERVICE_BUNDLES.map((bundle) => renderBundleBar(bundle)).join('')}</div>` : ''}
+    `
+  }
+
+  function renderServicesSection() {
+    const violations = serviceOrderViolations(state.services)
     elEditor.innerHTML = `
       <div class="pane-header">
         <div>
           <h2 class="pane-title">服务分流策略组</h2>
-          <p class="pane-desc">管理业务策略组顺序、开关、规则与规则集，支持 ⠿ 拖拽排序。</p>
+          <p class="pane-desc">上面的组先生效。</p>
         </div>
         <button class="btn btn-primary btn-sm" id="btn-add-service">+ 新增服务组</button>
       </div>
 
-      <div class="ai-preset-bar">
-        <div class="ai-preset-info">
-          <div class="ai-preset-title">
-            <span>海外 AI 细分预设</span>
-            ${
-              isAiSplit
-                ? `<span class="pill pill-blue">已细分 (${activeSplitCount}/7 组)</span>`
-                : '<span class="pill pill-gray">当前合并为「国外AI」</span>'
-            }
-          </div>
-          <div class="ai-preset-desc">
-            OpenAI / Claude / Gemini / Cursor / Grok / Copilot + 其他国外AI（置顶防抢占）
-          </div>
-        </div>
-        <div class="ai-preset-actions">
-          <button class="btn ${isAiSplit ? 'btn-sm' : 'btn-primary btn-sm'}" id="btn-apply-ai-split">
-            ${isAiSplit ? '重置 AI 细分预设' : '一键细分海外 AI'}
-          </button>
-          ${
-            isAiSplit
-              ? '<button class="btn btn-sm" id="btn-merge-ai-split">合并回「国外AI」</button>'
-              : ''
-          }
-        </div>
-      </div>
+      ${renderBundlePanel()}
 
       <div class="toolbar">
         <div class="chip-group">
@@ -767,11 +846,13 @@
           <button class="chip" data-svc-preset="dev">仅 AI + 谷歌 + 开发</button>
           <button class="chip" data-svc-preset="none">全部关闭</button>
         </div>
-        <input id="service-search-input" class="input" style="width: 210px; height: 29px" placeholder="搜索服务名称或规则..." value="${esc(serviceSearch)}" />
+        <input id="service-search-input" class="input toolbar-search" placeholder="搜索服务名称或规则..." value="${esc(serviceSearch)}" />
       </div>
 
+      <div id="service-order-banner-wrap">${renderServiceOrderSummaryBanner(violations)}</div>
+
       <div class="entity-list" id="service-entity-list">
-        ${renderServicesListMarkup()}
+        ${renderServicesListMarkup(violations)}
       </div>
     `
   }
@@ -1342,27 +1423,27 @@
         </div>
         <div class="form-grid-3" style="margin-bottom: 12px">
           <div class="field">
-            <label>HTTP 端口 (port) ${heldPill()}</label>
+            <label><span>HTTP (port)</span> ${heldPill()}</label>
             <input type="number" class="input mono" data-bind="core.port" data-type="number" value="${esc(c.port)}" />
           </div>
           <div class="field">
-            <label>SOCKS5 端口 ${heldPill()}</label>
+            <label><span>SOCKS5</span> ${heldPill()}</label>
             <input type="number" class="input mono" data-bind="core.socksPort" data-type="number" value="${esc(c.socksPort)}" />
           </div>
           <div class="field">
-            <label>混合端口 (mixed-port) ${heldPill()}</label>
+            <label><span>混合端口</span> ${heldPill()}</label>
             <input type="number" class="input mono" data-bind="core.mixedPort" data-type="number" value="${esc(c.mixedPort)}" />
           </div>
           <div class="field">
-            <label>Redir 端口 ${heldPill()}</label>
+            <label><span>Redir</span> ${heldPill()}</label>
             <input type="number" class="input mono" data-bind="core.redirPort" data-type="number" value="${esc(c.redirPort)}" />
           </div>
           <div class="field">
-            <label>TProxy 端口 ${heldPill()}</label>
+            <label><span>TProxy</span> ${heldPill()}</label>
             <input type="number" class="input mono" data-bind="core.tproxyPort" data-type="number" value="${esc(c.tproxyPort)}" />
           </div>
           <div class="field">
-            <label>绑定地址 (bind-address)</label>
+            <label><span>绑定地址</span></label>
             <input class="input mono" data-bind="core.bindAddress" value="${esc(c.bindAddress)}" />
           </div>
         </div>
@@ -1838,15 +1919,16 @@
   }
 
   function renderDiagnosticsBanner() {
-    if (!lastDiagnostics || lastDiagnostics.length === 0) return ''
-    const hasError = lastDiagnostics.some((d) => d.level === 'error')
+    const visible = (lastDiagnostics || []).filter((item) => !String(item.code || '').startsWith('shadow-'))
+    if (visible.length === 0) return ''
+    const hasError = visible.some((d) => d.level === 'error')
     return `
       <div class="diag-banner ${hasError ? 'is-error' : 'is-warn'}">
         <div class="diag-head">
-          <strong>${hasError ? '配置静态诊断异常' : '配置静态诊断提示'} (${lastDiagnostics.length})</strong>
+          <strong>${hasError ? '配置静态诊断异常' : '配置静态诊断提示'} (${visible.length})</strong>
         </div>
         <ul class="diag-list">
-          ${lastDiagnostics
+          ${visible
             .map(
               (d) =>
                 `<li><span class="pill ${d.level === 'error' ? 'pill-red' : 'pill-amber'}">${d.level === 'error' ? '错误' : '提示'}</span><span>${esc(d.message)}</span></li>`
@@ -2573,38 +2655,41 @@
     }
 
     // Service actions
-    if (t.closest('#btn-apply-ai-split')) {
-      pushUndo('应用海外 AI 细分预设')
-      const removeKeys = new Set(['openai', ...FOREIGN_AI_SPLIT_KEYS])
-      state.services = state.services.filter((s) => !removeKeys.has(s.key))
-      const presetGroups = createForeignAiSplitPreset()
-      state.services.unshift(...presetGroups)
-      openServiceIdx = -1
-      openServiceOriginalName = ''
-      recomputePreview()
+    if (t.closest('[data-toggle-bundles]')) {
+      bundlesOpen = !bundlesOpen
+      bundleInfoId = ''
       renderServicesSection()
-      showToast('已应用海外 AI 细分预设（7 组）')
       return
     }
 
-    if (t.closest('#btn-merge-ai-split')) {
-      pushUndo('合并海外 AI 策略组')
-      const removeKeys = new Set(['openai', ...FOREIGN_AI_SPLIT_KEYS])
-      const firstIdx = state.services.findIndex((s) => removeKeys.has(s.key))
-      state.services = state.services.filter((s) => !removeKeys.has(s.key))
-      state.services.splice(firstIdx >= 0 ? firstIdx : 0, 0, createMergedForeignAiService())
-      openServiceIdx = -1
-      openServiceOriginalName = ''
-      recomputePreview()
+    const bundleInfo = t.closest('[data-bundle-info]')
+    if (bundleInfo) {
+      const id = bundleInfo.dataset.bundleInfo
+      bundleInfoId = bundleInfoId === id ? '' : id
       renderServicesSection()
-      showToast('已合并回单个「国外AI」策略组')
+      return
+    }
+
+    const bundleAction = t.closest('[data-bundle-action]')
+    if (bundleAction) {
+      const bundle = SERVICE_BUNDLES.find((item) => item.id === bundleAction.dataset.bundleId)
+      const mode = bundleAction.dataset.bundleAction
+      if (bundle && (mode === 'split' || mode === 'merge')) {
+        pushUndo(mode === 'split' ? `细分「${bundle.title}」` : `合并「${bundle.title}」`)
+        applyServiceBundle(state, bundle.id, mode)
+        openServiceIdx = -1
+        openServiceOriginalName = ''
+        recomputePreview()
+        renderServicesSection()
+        showToast(mode === 'split' ? `已把「${bundle.title}」拆成 ${bundle.splitKeys.length} 组` : `已合并为「${bundle.mergedName}」`)
+      }
       return
     }
 
     const svcPreset = t.closest('[data-svc-preset]')
     if (svcPreset) {
       const p = svcPreset.dataset.svcPreset
-      const dailyKeys = new Set(['openai', ...FOREIGN_AI_SPLIT_KEYS, 'youtube', 'netflix', 'telegram', 'ads', 'apple', 'google', 'github', 'microsoft'])
+      const dailyKeys = new Set(['openai', 'media', 'social', ...FOREIGN_AI_SPLIT_KEYS, 'youtube', 'netflix', 'telegram', 'ads', 'apple', 'google', 'github', 'microsoft', 'discord', 'x', 'steam', 'netease'])
       const devKeys = new Set(['openai', ...FOREIGN_AI_SPLIT_KEYS, 'google', 'github', 'microsoft', 'ads'])
       if (p === 'devLean') {
         pushUndo('应用「开发精简」预设')
@@ -2691,6 +2776,11 @@
       return
     }
 
+    if (t.closest('[data-fix-service-order]')) {
+      fixServiceOrder()
+      return
+    }
+
     const toggleSvcOpen = t.closest('[data-toggle-svc-open]')
     if (toggleSvcOpen) {
       const idx = Number(toggleSvcOpen.dataset.toggleSvcOpen)
@@ -2712,6 +2802,7 @@
         else if (openServiceIdx === target) openServiceIdx = idx
         recomputePreview()
         renderServicesSection()
+        toastServiceOrder(item.name, item.key)
       }
       return
     }
@@ -2931,7 +3022,8 @@
     recomputePreview()
     if (type === 'service') renderServicesSection()
     else renderRegionsSection()
-    showToast(`已调整「${moved.name}」排序`)
+    if (type === 'service') toastServiceOrder(moved.name, moved.key)
+    else showToast(`已调整「${moved.name}」排序`)
     return true
   }
 

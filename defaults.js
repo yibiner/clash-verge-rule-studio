@@ -2,11 +2,13 @@
   'use strict'
 
   const QURE_BASE = 'https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/'
+  const CLAUDE_ICON = 'https://raw.githubusercontent.com/zuluion/Qure/master/IconSet/Color/Claude.png'
 
   const QURE_ICONS = [
     // 服务 & 应用
     { name: 'ChatGPT / OpenAI', category: '服务', url: QURE_BASE + 'ChatGPT.png' },
-    { name: 'AI / Claude', category: '服务', url: QURE_BASE + 'AI.png' },
+    { name: 'Claude', category: '服务', url: CLAUDE_ICON },
+    { name: 'AI', category: '服务', url: QURE_BASE + 'AI.png' },
     { name: 'Bot / Cursor', category: '服务', url: QURE_BASE + 'Bot.png' },
     { name: 'Copilot', category: '服务', url: QURE_BASE + 'Copilot.png' },
     { name: 'YouTube', category: '流媒体', url: QURE_BASE + 'YouTube.png' },
@@ -23,7 +25,6 @@
     { name: 'Hulu', category: '流媒体', url: QURE_BASE + 'Hulu.png' },
     { name: 'Emby', category: '流媒体', url: QURE_BASE + 'Emby.png' },
     { name: 'Telegram', category: '社交', url: QURE_BASE + 'Telegram.png' },
-    { name: 'WhatsApp', category: '社交', url: QURE_BASE + 'WhatsApp.png' },
     { name: 'Line', category: '社交', url: QURE_BASE + 'Line.png' },
     { name: 'Discord', category: '社交', url: QURE_BASE + 'Discord.png' },
     { name: 'Twitter / X', category: '社交', url: QURE_BASE + 'Twitter.png' },
@@ -164,6 +165,7 @@
   ].join('\n')
 
   function createDefaultState() {
+    const mediaSplit = createMediaSplitPreset()
     return {
       args: {
         enable: true,
@@ -273,7 +275,6 @@
           'geosite:telegram',
           'geosite:google',
           'geosite:amazon',
-          'geosite:category-bank-jp',
           'geosite:category-communication',
           'geosite:gfw',
         ],
@@ -459,214 +460,45 @@
         },
       ],
       services: [
+        createMergedForeignAiService(),
+        ...mediaSplit.filter((svc) => svc.key !== 'youtube'),
+        ...createSocialSplitPreset(),
         {
-          key: 'openai',
-          name: '国外AI',
+          key: 'netease',
+          name: '网易云音乐',
           enabled: true,
-          icon: QURE_BASE + 'ChatGPT.png',
-          url: 'https://chat.openai.com/cdn-cgi/trace',
+          icon: QURE_BASE + 'Netease_Music.png',
+          url: 'https://music.163.com/',
           reject: false,
-          directFirst: false,
+          directFirst: true,
           rules: [
-            'GEOSITE,jetbrains-ai,国外AI',
-            'GEOSITE,category-ai-!cn,国外AI',
-            'GEOSITE,category-ai-chat-!cn,国外AI',
-            'DOMAIN-SUFFIX,meta.ai,国外AI',
-            'DOMAIN-SUFFIX,meta.com,国外AI',
+            'DOMAIN-SUFFIX,music.163.com,网易云音乐',
+            'DOMAIN-SUFFIX,music.126.net,网易云音乐',
+            'RULE-SET,netease-music,网易云音乐',
           ],
-          providers: [],
-        },
-        {
-          key: 'youtube',
-          name: 'YouTube',
-          enabled: true,
-          icon: QURE_BASE + 'YouTube.png',
-          url: 'https://www.youtube.com/s/desktop/494dd881/img/favicon.ico',
-          reject: false,
-          directFirst: false,
-          rules: ['GEOSITE,youtube,YouTube'],
-          providers: [],
-        },
-        {
-          key: 'mediaHMT',
-          name: '港澳台媒体',
-          enabled: true,
-          icon: QURE_BASE + 'TVB.png',
-          url: 'https://viu.tv/',
-          reject: false,
-          directFirst: false,
-          rules: ['RULE-SET,hk-media,港澳台媒体', 'RULE-SET,tw-media,港澳台媒体'],
           providers: [
             {
-              key: 'hk-media',
-              url: 'https://ruleset.skk.moe/Clash/non_ip/stream_hk.txt',
-              path: './ruleset/ruleset.skk.moe/stream_hk.txt',
-              format: 'text',
-              behavior: 'classical',
-            },
-            {
-              key: 'tw-media',
-              url: 'https://ruleset.skk.moe/Clash/non_ip/stream_tw.txt',
-              path: './ruleset/ruleset.skk.moe/stream_tw.txt',
+              key: 'netease-music',
+              url: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Ruleset/NetEaseMusic.list',
+              path: './ruleset/ACL4SSR/NetEaseMusic.list',
               format: 'text',
               behavior: 'classical',
             },
           ],
         },
+        ...createGamesSplitPreset(),
         {
-          key: 'biliintl',
-          name: '哔哩哔哩东南亚',
+          key: 'apple',
+          name: '苹果服务',
           enabled: true,
-          icon: QURE_BASE + 'bilibili_3.png',
-          url: 'https://www.bilibili.tv/',
-          reject: false,
-          directFirst: true,
-          rules: ['GEOSITE,biliintl,哔哩哔哩东南亚'],
-          providers: [],
-        },
-        {
-          key: 'bahamut',
-          name: '巴哈姆特',
-          enabled: true,
-          icon: QURE_BASE + 'Bahamut.png',
-          url: 'https://ani.gamer.com.tw/ajax/getdeviceid.php',
-          reject: false,
-          directFirst: true,
-          rules: ['GEOSITE,bahamut,巴哈姆特'],
-          providers: [],
-        },
-        {
-          key: 'disney',
-          name: 'Disney+',
-          enabled: true,
-          icon: QURE_BASE + 'Disney+.png',
-          url: 'https://disney.api.edge.bamgrid.com/devices',
+          icon: QURE_BASE + 'Apple_2.png',
+          url: 'https://www.apple.com/library/test/success.html',
           reject: false,
           directFirst: false,
-          rules: ['GEOSITE,disney,Disney+'],
+          rules: ['GEOSITE,apple-cn,直连', 'GEOSITE,apple,苹果服务'],
           providers: [],
         },
-        {
-          key: 'netflix',
-          name: 'NETFLIX',
-          enabled: true,
-          icon: QURE_BASE + 'Netflix.png',
-          url: 'https://api.fast.com/netflix/speedtest/v2?https=true',
-          reject: false,
-          directFirst: false,
-          rules: ['GEOSITE,netflix,NETFLIX'],
-          providers: [],
-        },
-        {
-          key: 'tiktok',
-          name: 'Tiktok',
-          enabled: true,
-          icon: QURE_BASE + 'TikTok.png',
-          url: 'https://www.tiktok.com/',
-          reject: false,
-          directFirst: false,
-          rules: ['GEOSITE,tiktok,Tiktok'],
-          providers: [],
-        },
-        {
-          key: 'spotify',
-          name: 'Spotify',
-          enabled: true,
-          icon: QURE_BASE + 'Spotify.png',
-          url: 'https://spclient.wg.spotify.com/signup/public/v1/account',
-          reject: false,
-          directFirst: false,
-          rules: ['GEOSITE,spotify,Spotify'],
-          providers: [],
-        },
-        {
-          key: 'pixiv',
-          name: 'Pixiv',
-          enabled: true,
-          icon: 'https://play-lh.googleusercontent.com/8pFuLOHF62ADcN0ISUAyEueA5G8IF49mX_6Az6pQNtokNVHxIVbS1L2NM62H-k02rLM=w240-h480-rw',
-          url: 'https://www.pixiv.net/',
-          reject: false,
-          directFirst: false,
-          rules: ['GEOSITE,pixiv,Pixiv'],
-          providers: [],
-        },
-        {
-          key: 'hbo',
-          name: 'HBO',
-          enabled: true,
-          icon: QURE_BASE + 'HBO.png',
-          url: 'https://www.hbo.com/favicon.ico',
-          reject: false,
-          directFirst: false,
-          rules: ['GEOSITE,hbo,HBO'],
-          providers: [],
-        },
-        {
-          key: 'primevideo',
-          name: 'Prime Video',
-          enabled: true,
-          icon: QURE_BASE + 'Prime_Video.png',
-          url: 'https://m.media-amazon.com/images/G/01/digital/video/web/logo-min-remaster.png',
-          reject: false,
-          directFirst: false,
-          rules: ['GEOSITE,primevideo,Prime Video'],
-          providers: [],
-        },
-        {
-          key: 'hulu',
-          name: 'Hulu',
-          enabled: true,
-          icon: QURE_BASE + 'Hulu.png',
-          url: 'https://auth.hulu.com/v4/web/password/authenticate',
-          reject: false,
-          directFirst: false,
-          rules: ['GEOSITE,hulu,Hulu'],
-          providers: [],
-        },
-        {
-          key: 'telegram',
-          name: 'Telegram',
-          enabled: true,
-          icon: QURE_BASE + 'Telegram.png',
-          url: 'https://www.telegram.org/img/website_icon.svg',
-          reject: false,
-          directFirst: false,
-          rules: ['GEOSITE,telegram,Telegram', 'GEOIP,telegram,Telegram,no-resolve'],
-          providers: [],
-        },
-        {
-          key: 'whatsapp',
-          name: 'WhatsApp',
-          enabled: true,
-          icon: QURE_BASE + 'WhatsApp.png',
-          url: 'https://web.whatsapp.com/data/manifest.json',
-          reject: false,
-          directFirst: false,
-          rules: ['GEOSITE,whatsapp,WhatsApp'],
-          providers: [],
-        },
-        {
-          key: 'line',
-          name: 'Line',
-          enabled: true,
-          icon: QURE_BASE + 'Line.png',
-          url: 'https://line.me/page-data/app-data.json',
-          reject: false,
-          directFirst: false,
-          rules: ['GEOSITE,line,Line'],
-          providers: [],
-        },
-        {
-          key: 'games',
-          name: '游戏专用',
-          enabled: true,
-          icon: QURE_BASE + 'Game.png',
-          url: '',
-          reject: false,
-          directFirst: false,
-          rules: ['GEOSITE,category-games@cn,国内网站', 'GEOSITE,category-games,游戏专用'],
-          providers: [],
-        },
+        ...createDevSplitPreset(),
         {
           key: 'ads',
           name: '广告过滤',
@@ -686,17 +518,7 @@
             },
           ],
         },
-        {
-          key: 'apple',
-          name: '苹果服务',
-          enabled: true,
-          icon: QURE_BASE + 'Apple_2.png',
-          url: 'https://www.apple.com/library/test/success.html',
-          reject: false,
-          directFirst: false,
-          rules: ['GEOSITE,apple-cn,苹果服务'],
-          providers: [],
-        },
+        ...mediaSplit.filter((svc) => svc.key === 'youtube'),
         {
           key: 'google',
           name: '谷歌服务',
@@ -707,47 +529,6 @@
           directFirst: false,
           rules: ['GEOSITE,google,谷歌服务'],
           providers: [],
-        },
-        {
-          key: 'github',
-          name: 'Github',
-          enabled: true,
-          icon: QURE_BASE + 'GitHub.png',
-          url: 'https://github.com/robots.txt',
-          reject: false,
-          directFirst: false,
-          rules: ['GEOSITE,github,Github'],
-          providers: [],
-        },
-        {
-          key: 'microsoft',
-          name: '微软服务',
-          enabled: true,
-          icon: QURE_BASE + 'Microsoft.png',
-          url: 'https://www.msftconnecttest.com/connecttest.txt',
-          reject: false,
-          directFirst: false,
-          rules: ['GEOSITE,microsoft@cn,国内网站', 'GEOSITE,microsoft,微软服务'],
-          providers: [],
-        },
-        {
-          key: 'japan',
-          name: '日本网站',
-          enabled: true,
-          icon: QURE_BASE + 'JP.png',
-          url: 'https://r.r10s.jp/com/img/home/logo/touch.png',
-          reject: false,
-          directFirst: false,
-          rules: ['RULE-SET,category-bank-jp,日本网站', 'GEOIP,jp,日本网站,no-resolve'],
-          providers: [
-            {
-              key: 'category-bank-jp',
-              url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-bank-jp.mrs',
-              path: './ruleset/MetaCubeX/category-bank-jp.mrs',
-              format: 'mrs',
-              behavior: 'domain',
-            },
-          ],
         },
       ],
       sampleNodesText: SAMPLE_NODES_TEXT,
@@ -772,7 +553,18 @@
       initialRules: Array.isArray(parsed.initialRules) ? parsed.initialRules : def.initialRules,
       fallbackRules: Array.isArray(parsed.fallbackRules) ? parsed.fallbackRules : def.fallbackRules,
       regions: Array.isArray(parsed.regions) ? parsed.regions : def.regions,
-      services: Array.isArray(parsed.services) ? parsed.services : def.services,
+      services: Array.isArray(parsed.services)
+        ? parsed.services.map((svc) => {
+            if (!svc) return svc
+            if (svc.key === 'ai_claude' && svc.icon === QURE_BASE + 'AI.png') {
+              return { ...svc, icon: CLAUDE_ICON }
+            }
+            if (svc.key === 'whatsapp' && svc.icon === QURE_BASE + 'WhatsApp.png') {
+              return { ...svc, icon: 'https://static.whatsapp.net/rsrc.php/v3/yP/r/rYZqPCBaG70.png' }
+            }
+            return svc
+          })
+        : def.services,
       systemGroups: {
         defaultGroup: { ...def.systemGroups.defaultGroup, ...(parsed.systemGroups?.defaultGroup || {}) },
         otherGroup: { ...def.systemGroups.otherGroup, ...(parsed.systemGroups?.otherGroup || {}) },
@@ -812,7 +604,7 @@
         name: 'Claude',
         enabled: true,
         preferRegion: 'SG',
-        icon: QURE_BASE + 'AI.png',
+        icon: CLAUDE_ICON,
         url: 'https://claude.ai/cdn-cgi/trace',
         reject: false,
         directFirst: false,
@@ -960,6 +752,9 @@
       reject: false,
       directFirst: false,
       rules: [
+        'DOMAIN-SUFFIX,x.ai,国外AI',
+        'DOMAIN-SUFFIX,grok.com,国外AI',
+        'DOMAIN-SUFFIX,grok.x.com,国外AI',
         'GEOSITE,jetbrains-ai,国外AI',
         'GEOSITE,category-ai-!cn,国外AI',
         'GEOSITE,category-ai-chat-!cn,国外AI',
@@ -970,7 +765,468 @@
     }
   }
 
+  function createMediaSplitPreset() {
+    return [
+      {
+        key: 'youtube',
+        name: 'YouTube',
+        enabled: true,
+        icon: QURE_BASE + 'YouTube.png',
+        url: 'https://www.youtube.com/s/desktop/494dd881/img/favicon.ico',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,youtube,YouTube'],
+        providers: [],
+      },
+      {
+        key: 'mediaHMT',
+        name: '港澳台媒体',
+        enabled: true,
+        icon: QURE_BASE + 'TVB.png',
+        url: 'https://viu.tv/',
+        reject: false,
+        directFirst: false,
+        rules: ['RULE-SET,hk-media,港澳台媒体', 'RULE-SET,tw-media,港澳台媒体'],
+        providers: [
+          {
+            key: 'hk-media',
+            url: 'https://ruleset.skk.moe/Clash/non_ip/stream_hk.txt',
+            path: './ruleset/ruleset.skk.moe/stream_hk.txt',
+            format: 'text',
+            behavior: 'classical',
+          },
+          {
+            key: 'tw-media',
+            url: 'https://ruleset.skk.moe/Clash/non_ip/stream_tw.txt',
+            path: './ruleset/ruleset.skk.moe/stream_tw.txt',
+            format: 'text',
+            behavior: 'classical',
+          },
+        ],
+      },
+      {
+        key: 'biliintl',
+        name: '哔哩哔哩东南亚',
+        enabled: true,
+        icon: QURE_BASE + 'bilibili_3.png',
+        url: 'https://www.bilibili.tv/',
+        reject: false,
+        directFirst: true,
+        rules: ['GEOSITE,biliintl,哔哩哔哩东南亚'],
+        providers: [],
+      },
+      {
+        key: 'bahamut',
+        name: '巴哈姆特',
+        enabled: true,
+        icon: QURE_BASE + 'Bahamut.png',
+        url: 'https://ani.gamer.com.tw/ajax/getdeviceid.php',
+        reject: false,
+        directFirst: true,
+        rules: ['GEOSITE,bahamut,巴哈姆特'],
+        providers: [],
+      },
+      {
+        key: 'disney',
+        name: 'Disney+',
+        enabled: true,
+        icon: QURE_BASE + 'Disney+.png',
+        url: 'https://disney.api.edge.bamgrid.com/devices',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,disney,Disney+'],
+        providers: [],
+      },
+      {
+        key: 'netflix',
+        name: 'NETFLIX',
+        enabled: true,
+        icon: QURE_BASE + 'Netflix.png',
+        url: 'https://api.fast.com/netflix/speedtest/v2?https=true',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,netflix,NETFLIX'],
+        providers: [],
+      },
+      {
+        key: 'tiktok',
+        name: 'Tiktok',
+        enabled: true,
+        icon: QURE_BASE + 'TikTok.png',
+        url: 'https://www.tiktok.com/',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,tiktok,Tiktok'],
+        providers: [],
+      },
+      {
+        key: 'spotify',
+        name: 'Spotify',
+        enabled: true,
+        icon: QURE_BASE + 'Spotify.png',
+        url: 'https://spclient.wg.spotify.com/signup/public/v1/account',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,spotify,Spotify'],
+        providers: [],
+      },
+      {
+        key: 'pixiv',
+        name: 'Pixiv',
+        enabled: true,
+        icon: 'https://play-lh.googleusercontent.com/8pFuLOHF62ADcN0ISUAyEueA5G8IF49mX_6Az6pQNtokNVHxIVbS1L2NM62H-k02rLM=w240-h480-rw',
+        url: 'https://www.pixiv.net/',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,pixiv,Pixiv'],
+        providers: [],
+      },
+      {
+        key: 'hbo',
+        name: 'HBO',
+        enabled: true,
+        icon: QURE_BASE + 'HBO.png',
+        url: 'https://www.hbo.com/favicon.ico',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,hbo,HBO'],
+        providers: [],
+      },
+      {
+        key: 'primevideo',
+        name: 'Prime Video',
+        enabled: true,
+        icon: QURE_BASE + 'Prime_Video.png',
+        url: 'https://m.media-amazon.com/images/G/01/digital/video/web/logo-min-remaster.png',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,primevideo,Prime Video'],
+        providers: [],
+      },
+      {
+        key: 'hulu',
+        name: 'Hulu',
+        enabled: true,
+        icon: QURE_BASE + 'Hulu.png',
+        url: 'https://auth.hulu.com/v4/web/password/authenticate',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,hulu,Hulu'],
+        providers: [],
+      },
+    ]
+  }
+
+  function createMergedMediaService() {
+    return {
+      key: 'media',
+      name: '流媒体',
+      enabled: true,
+      icon: QURE_BASE + 'Streaming!CN.png',
+      url: 'https://www.youtube.com/s/desktop/494dd881/img/favicon.ico',
+      reject: false,
+      directFirst: false,
+      rules: [
+        'GEOSITE,youtube,流媒体',
+        'GEOSITE,netflix,流媒体',
+        'GEOSITE,disney,流媒体',
+        'GEOSITE,hbo,流媒体',
+        'GEOSITE,hulu,流媒体',
+        'GEOSITE,primevideo,流媒体',
+        'GEOSITE,bahamut,流媒体',
+        'GEOSITE,spotify,流媒体',
+        'GEOSITE,tiktok,流媒体',
+        'GEOSITE,biliintl,流媒体',
+        'GEOSITE,pixiv,流媒体',
+        'RULE-SET,hk-media,流媒体',
+        'RULE-SET,tw-media,流媒体',
+      ],
+      providers: [
+        {
+          key: 'hk-media',
+          url: 'https://ruleset.skk.moe/Clash/non_ip/stream_hk.txt',
+          path: './ruleset/ruleset.skk.moe/stream_hk.txt',
+          format: 'text',
+          behavior: 'classical',
+        },
+        {
+          key: 'tw-media',
+          url: 'https://ruleset.skk.moe/Clash/non_ip/stream_tw.txt',
+          path: './ruleset/ruleset.skk.moe/stream_tw.txt',
+          format: 'text',
+          behavior: 'classical',
+        },
+      ],
+    }
+  }
+
+  function createSocialSplitPreset() {
+    return [
+      {
+        key: 'telegram',
+        name: 'Telegram',
+        enabled: true,
+        icon: QURE_BASE + 'Telegram.png',
+        url: 'https://www.telegram.org/img/website_icon.svg',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,telegram,Telegram', 'GEOIP,telegram,Telegram,no-resolve'],
+        providers: [],
+      },
+      {
+        key: 'whatsapp',
+        name: 'WhatsApp',
+        enabled: true,
+        icon: 'https://static.whatsapp.net/rsrc.php/v3/yP/r/rYZqPCBaG70.png',
+        url: 'https://web.whatsapp.com/data/manifest.json',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,whatsapp,WhatsApp'],
+        providers: [],
+      },
+      {
+        key: 'line',
+        name: 'Line',
+        enabled: true,
+        icon: QURE_BASE + 'Line.png',
+        url: 'https://line.me/page-data/app-data.json',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,line,Line'],
+        providers: [],
+      },
+      {
+        key: 'discord',
+        name: 'Discord',
+        enabled: true,
+        icon: QURE_BASE + 'Discord.png',
+        url: 'https://discord.com/api/v9/gateway',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,discord,Discord'],
+        providers: [],
+      },
+      {
+        key: 'x',
+        name: 'X',
+        enabled: true,
+        icon: QURE_BASE + 'Twitter.png',
+        url: 'https://x.com/',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,twitter,X', 'DOMAIN-SUFFIX,x.com,X', 'DOMAIN-SUFFIX,twitter.com,X'],
+        providers: [],
+      },
+    ]
+  }
+
+  function createMergedSocialService() {
+    return {
+      key: 'social',
+      name: '社交媒体',
+      enabled: true,
+      icon: QURE_BASE + 'Telegram.png',
+      url: 'https://www.telegram.org/',
+      reject: false,
+      directFirst: false,
+      rules: [
+        'GEOSITE,telegram,社交媒体',
+        'GEOIP,telegram,社交媒体,no-resolve',
+        'GEOSITE,whatsapp,社交媒体',
+        'GEOSITE,line,社交媒体',
+        'GEOSITE,discord,社交媒体',
+        'GEOSITE,twitter,社交媒体',
+        'DOMAIN-SUFFIX,x.com,社交媒体',
+        'DOMAIN-SUFFIX,twitter.com,社交媒体',
+      ],
+      providers: [],
+    }
+  }
+
+  function createGamesSplitPreset() {
+    return [
+      {
+        key: 'steam',
+        name: 'Steam',
+        enabled: true,
+        icon: QURE_BASE + 'Steam.png',
+        url: 'https://store.steampowered.com/',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,steam@cn,直连', 'GEOSITE,steam,Steam'],
+        providers: [],
+      },
+      {
+        key: 'games',
+        name: '游戏专用',
+        enabled: true,
+        icon: QURE_BASE + 'Game.png',
+        url: '',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,category-games@cn,国内网站', 'GEOSITE,category-games,游戏专用'],
+        providers: [],
+      },
+    ]
+  }
+
+  function createMergedGamesService() {
+    return {
+      key: 'games',
+      name: '游戏专用',
+      enabled: true,
+      icon: QURE_BASE + 'Game.png',
+      url: '',
+      reject: false,
+      directFirst: false,
+      rules: [
+        'GEOSITE,steam@cn,直连',
+        'GEOSITE,category-games@cn,国内网站',
+        'GEOSITE,steam,游戏专用',
+        'GEOSITE,category-games,游戏专用',
+      ],
+      providers: [],
+    }
+  }
+
+  function createDevSplitPreset() {
+    return [
+      {
+        key: 'github',
+        name: 'Github',
+        enabled: true,
+        icon: QURE_BASE + 'GitHub.png',
+        url: 'https://github.com/robots.txt',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,github,Github'],
+        providers: [],
+      },
+      {
+        key: 'microsoft',
+        name: '微软服务',
+        enabled: true,
+        icon: QURE_BASE + 'Microsoft.png',
+        url: 'https://www.msftconnecttest.com/connecttest.txt',
+        reject: false,
+        directFirst: false,
+        rules: ['GEOSITE,microsoft@cn,国内网站', 'GEOSITE,microsoft,微软服务'],
+        providers: [],
+      },
+    ]
+  }
+
+  function createMergedDevService() {
+    return {
+      key: 'microsoft',
+      name: '微软服务',
+      enabled: true,
+      icon: QURE_BASE + 'Microsoft.png',
+      url: 'https://www.msftconnecttest.com/connecttest.txt',
+      reject: false,
+      directFirst: false,
+      rules: [
+        'GEOSITE,microsoft@cn,国内网站',
+        'GEOSITE,github,微软服务',
+        'GEOSITE,microsoft,微软服务',
+      ],
+      providers: [],
+    }
+  }
+
   const FOREIGN_AI_SPLIT_KEYS = ['ai_openai', 'ai_claude', 'ai_gemini', 'ai_cursor', 'ai_grok', 'ai_copilot', 'ai_other']
+  const MEDIA_SPLIT_KEYS = ['youtube', 'mediaHMT', 'biliintl', 'bahamut', 'disney', 'netflix', 'tiktok', 'spotify', 'pixiv', 'hbo', 'primevideo', 'hulu']
+  const SOCIAL_SPLIT_KEYS = ['telegram', 'whatsapp', 'line', 'discord', 'x']
+
+  const SERVICE_BUNDLES = [
+    {
+      id: 'ai',
+      title: '海外 AI',
+      mergedName: '国外AI',
+      desc: '细分后 OpenAI、Claude、Gemini、Cursor、Grok、Copilot 可各自选节点。Gemini 要排在谷歌服务之前。',
+      mergedKey: 'openai',
+      splitKeys: FOREIGN_AI_SPLIT_KEYS,
+      place: 'front',
+      createSplit: createForeignAiSplitPreset,
+      createMerged: createMergedForeignAiService,
+    },
+    {
+      id: 'media',
+      title: '流媒体',
+      mergedName: '流媒体',
+      desc: 'YouTube、Netflix、Disney+、港澳台等合成一个组，或拆开为各自选解锁节点。合并后巴哈姆特和哔哩哔哩东南亚不再默认直连。YouTube 规则仍要排在谷歌服务之前。',
+      mergedKey: 'media',
+      splitKeys: MEDIA_SPLIT_KEYS,
+      place: 'keep',
+      mergeAnchor: 'youtube',
+      createSplit: createMediaSplitPreset,
+      createMerged: createMergedMediaService,
+    },
+    {
+      id: 'social',
+      title: '社交',
+      mergedName: '社交媒体',
+      desc: 'Telegram、WhatsApp、Line、Discord、X 合成一个组，或拆开各自选节点。含 X 时要排在 Grok 之后。',
+      mergedKey: 'social',
+      splitKeys: SOCIAL_SPLIT_KEYS,
+      place: 'keep',
+      createSplit: createSocialSplitPreset,
+      createMerged: createMergedSocialService,
+    },
+    {
+      id: 'games',
+      title: '游戏',
+      mergedName: '游戏专用',
+      desc: 'Steam 与其他游戏合成一个组，或把 Steam 单独拿出来选节点。国内 Steam 下载和国产游戏仍然直连。',
+      mergedKey: 'games',
+      splitKeys: ['steam', 'games'],
+      place: 'keep',
+      createSplit: createGamesSplitPreset,
+      createMerged: createMergedGamesService,
+    },
+    {
+      id: 'dev',
+      title: '微软与 Github',
+      mergedName: '微软服务',
+      desc: 'Github 和微软服务合成一个组，或分开选节点。Copilot 仍留在 AI 里，并且要排在这两组之前。',
+      mergedKey: 'microsoft',
+      splitKeys: ['github', 'microsoft'],
+      place: 'keep',
+      createSplit: createDevSplitPreset,
+      createMerged: createMergedDevService,
+    },
+  ]
+
+  function bundleMarkerKeys(bundle) {
+    const markers = bundle.splitKeys.filter((key) => key !== bundle.mergedKey)
+    return markers.length > 0 ? markers : bundle.splitKeys
+  }
+
+  function isBundleSplit(services, bundle) {
+    const keys = new Set((services || []).map((svc) => svc.key))
+    return bundleMarkerKeys(bundle).some((key) => keys.has(key))
+  }
+
+  function applyServiceBundle(state, bundleId, mode) {
+    const bundle = SERVICE_BUNDLES.find((item) => item.id === bundleId)
+    if (!bundle) return state
+    const remove = new Set([bundle.mergedKey, ...bundle.splitKeys])
+    let anchorIdx = bundle.mergeAnchor ? state.services.findIndex((svc) => svc.key === bundle.mergeAnchor) : -1
+    if (anchorIdx < 0 && bundle.id === 'media') {
+      anchorIdx = state.services.findIndex((svc) => svc.key === bundle.mergedKey)
+    }
+    if (anchorIdx < 0 && bundle.id === 'media') {
+      anchorIdx = state.services.findIndex((svc) => svc.key === 'google')
+    }
+    const pivot = anchorIdx >= 0 ? anchorIdx : state.services.findIndex((svc) => remove.has(svc.key))
+    const removedBefore = pivot > 0 ? state.services.slice(0, pivot).filter((svc) => remove.has(svc.key)).length : 0
+    state.services = state.services.filter((svc) => !remove.has(svc.key))
+    const incoming = mode === 'split' ? bundle.createSplit() : [bundle.createMerged()]
+    let firstIdx = pivot >= 0 ? pivot - removedBefore : 0
+    if (bundle.place === 'front' && mode === 'split') firstIdx = 0
+    state.services.splice(firstIdx, 0, ...incoming)
+    return state
+  }
 
   const DEV_LEAN_ENABLED = [
     'ai_cursor',
@@ -979,11 +1235,16 @@
     'ai_claude',
     'ai_grok',
     'ai_other',
+    'ads',
     'youtube',
     'google',
     'github',
     'microsoft',
     'apple',
+    'discord',
+    'x',
+    'steam',
+    'netease',
     'whatsapp',
     'telegram',
     'line',
@@ -992,7 +1253,6 @@
     'tiktok',
     'mediaHMT',
     'games',
-    'ads',
   ]
 
   const DEV_LEAN_ORDER = [
@@ -1003,11 +1263,13 @@
     'ai_grok',
     'ai_copilot',
     'ai_other',
-    'youtube',
-    'google',
     'github',
     'microsoft',
     'apple',
+    'discord',
+    'x',
+    'steam',
+    'netease',
     'whatsapp',
     'telegram',
     'line',
@@ -1017,6 +1279,8 @@
     'mediaHMT',
     'games',
     'ads',
+    'youtube',
+    'google',
     'bahamut',
     'netflix',
     'disney',
@@ -1024,17 +1288,136 @@
     'hbo',
     'primevideo',
     'hulu',
-    'japan',
   ]
+
+  const SERVICE_ORDER_RULES = [
+    {
+      code: 'shadow-ads',
+      earlier: ['ads'],
+      later: ['youtube', 'media', 'google'],
+      hint: '广告过滤要排在 YouTube、流媒体和谷歌服务之前',
+      reason: '部分广告流量不会被过滤。',
+    },
+    {
+      code: 'shadow-google',
+      earlier: ['youtube', 'media', 'ai_gemini'],
+      later: ['google'],
+      hint: 'YouTube、流媒体和 Gemini 要排在谷歌服务之前',
+      reason: 'GEOSITE,google 会抢占它们的域名。',
+    },
+    {
+      code: 'shadow-ai-other',
+      earlier: ['ai_openai', 'ai_claude', 'ai_gemini', 'ai_cursor', 'ai_grok', 'ai_copilot'],
+      later: ['ai_other'],
+      hint: '细分 AI 要排在其他国外AI之前',
+      reason: '其他国外AI 的兜底规则会先接走这些域名。',
+    },
+    {
+      code: 'shadow-x',
+      earlier: ['ai_grok', 'openai'],
+      later: ['x', 'social'],
+      hint: 'Grok 和国外AI要排在 X 和社交媒体之前',
+      reason: 'X 的 x.com 后缀会接走 grok.x.com。',
+    },
+    {
+      code: 'shadow-copilot',
+      earlier: ['ai_copilot'],
+      later: ['github', 'microsoft'],
+      hint: 'Copilot 要排在 Github 和微软服务之前',
+      reason: '这两个组会先接走 Copilot 相关域名。',
+    },
+    {
+      code: 'shadow-games',
+      earlier: ['steam'],
+      later: ['games'],
+      hint: 'Steam 要排在游戏专用之前',
+      reason: 'category-games 会先接走 Steam 域名。',
+    },
+  ]
+
+  function serviceOrderViolations(services) {
+    const enabled = (services || []).filter((s) => s.enabled)
+    const indexOf = (key) => enabled.findIndex((s) => s.key === key)
+    const found = []
+    for (const rule of SERVICE_ORDER_RULES) {
+      for (const laterKey of rule.later) {
+        const laterPos = indexOf(laterKey)
+        if (laterPos < 0) continue
+        for (const earlierKey of rule.earlier) {
+          const earlierPos = indexOf(earlierKey)
+          if (earlierPos < 0 || earlierPos < laterPos) continue
+          found.push({
+            code: rule.code,
+            earlierKey,
+            laterKey,
+            hint: rule.hint,
+            reason: rule.reason,
+            message: `「${enabled[earlierPos].name}」排在「${enabled[laterPos].name}」之后。${rule.reason}`,
+          })
+        }
+      }
+    }
+    return found
+  }
+
+  function repairServiceOrder(services) {
+    const list = (services || []).slice()
+    const guard = list.length * list.length + 1
+    for (let n = 0; n < guard; n++) {
+      const violations = serviceOrderViolations(list)
+      if (!violations.length) return list
+      let best = null
+      for (const violation of violations) {
+        const laterIdx = list.findIndex((svc) => svc.enabled && svc.key === violation.laterKey)
+        const earlierIdx = list.findIndex((svc) => svc.enabled && svc.key === violation.earlierKey)
+        if (laterIdx < 0 || earlierIdx < 0 || earlierIdx < laterIdx) continue
+        if (
+          !best ||
+          laterIdx < best.laterIdx ||
+          (laterIdx === best.laterIdx && earlierIdx < best.earlierIdx)
+        ) {
+          best = { earlierIdx, laterIdx }
+        }
+      }
+      if (!best) return list
+      const [item] = list.splice(best.earlierIdx, 1)
+      list.splice(best.laterIdx, 0, item)
+    }
+    return list
+  }
 
   const SG_FIRST_KEYS = ['ai_cursor', 'ai_gemini', 'ai_openai', 'ai_claude', 'ai_grok', 'ai_other']
 
   function applyDevLeanPreset(state) {
-    state.services = state.services.filter((s) => s.key !== 'openai')
+    state.services = state.services.filter((s) => s.key !== 'openai' && s.key !== 'japan')
     const existingKeys = new Set(state.services.map((s) => s.key))
     const missingAi = createForeignAiSplitPreset().filter((s) => !existingKeys.has(s.key))
     if (missingAi.length > 0) {
       state.services.unshift(...missingAi)
+    }
+
+    const catalog = new Map(createDefaultState().services.map((s) => [s.key, s]))
+    for (const bundle of SERVICE_BUNDLES) {
+      if (bundle.id === 'ai') continue
+      if (!isBundleSplit(state.services, bundle)) {
+        applyServiceBundle(state, bundle.id, 'split')
+      } else if (!bundle.splitKeys.includes(bundle.mergedKey)) {
+        state.services = state.services.filter((svc) => svc.key !== bundle.mergedKey)
+      }
+    }
+    const presentKeys = new Set(state.services.map((svc) => svc.key))
+    for (const key of DEV_LEAN_ENABLED) {
+      if (presentKeys.has(key) || !catalog.has(key)) continue
+      state.services.push(JSON.parse(JSON.stringify(catalog.get(key))))
+      presentKeys.add(key)
+    }
+
+    const apple = state.services.find((s) => s.key === 'apple')
+    if (apple) {
+      const rules = (apple.rules || []).map((rule) => String(rule).trim()).filter(Boolean)
+      if (rules.length === 0 || (rules.length === 1 && rules[0] === 'GEOSITE,apple-cn,苹果服务')) {
+        apple.rules = ['GEOSITE,apple-cn,直连', 'GEOSITE,apple,苹果服务']
+      }
     }
 
     const enabled = new Set(DEV_LEAN_ENABLED)
@@ -1073,10 +1456,16 @@
     DNS_MODES,
     SAMPLE_NODES_TEXT,
     FOREIGN_AI_SPLIT_KEYS,
+    SERVICE_BUNDLES,
+    SERVICE_ORDER_RULES,
     createDefaultState,
     mergeStateWithDefaults,
     createForeignAiSplitPreset,
     createMergedForeignAiService,
     applyDevLeanPreset,
+    applyServiceBundle,
+    isBundleSplit,
+    serviceOrderViolations,
+    repairServiceOrder,
   }
 })(window)

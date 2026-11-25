@@ -17,14 +17,14 @@
 ## 主要特性
 
 - **默认尊重 Clash Verge 接管字段**：默认不写入端口、`allow-lan`、`ipv6`（含 `dns.ipv6`）、`mode`、`unified-delay`、`external-controller`、`secret` 及 TUN 常规配置，避免覆盖 Clash Verge 设置页；需要给 Mihomo Party 或纯 Mihomo 内核使用时，可在「内核与 TUN」顶部一键开启写入。
-- **面向开发者的 AI 细分与精简预设**：
-  - **海外 AI 细分**：一键拆分为 `OpenAI`、`Claude`、`Gemini`（含 Google Antigravity）、`Cursor`、`Grok`、`Copilot` 与 `其他国外AI` 兜底组，置顶防抢占，也支持一键合并回「国外AI」。
-  - **开发精简预设**：YouTube 排在谷歌服务前，默认节点与拆分后的国外 AI 组优先新加坡（`SG`）；`downloads.cursor.com` 直连，其余 Cursor 域名走代理。对应导出快照见 [`presets/dev-lean/global_script.js`](presets/dev-lean/global_script.js)。
+- **服务分组「细分与合并」与开发精简预设**：
+  - **五大分组一键拆合**：支持对 **海外 AI**（`OpenAI`、`Claude`、`Gemini` 含 Google Antigravity、`Cursor`、`Grok`、`Copilot`、`其他国外AI`）、**流媒体**（`YouTube`、`Netflix`、`Disney+`、港澳台等 12 组）、**社交**（`Telegram`、`WhatsApp`、`Line`、`Discord`、`X`）、**游戏**（`Steam`、`游戏专用`）、**微软与 Github** 按需一键拆分或合并；苹果（`apple-cn` 直连 + 国际代理）、谷歌、广告过滤、网易云音乐保持独立单组。
+  - **开发精简预设**：开启常用开发、AI、社交、流媒体与网易云音乐分流，默认节点与海外 AI 优先新加坡（`SG`）；`downloads.cursor.com` 直连，其余 Cursor 域名走代理；自动排好广告过滤、YouTube 与谷歌服务顺序。对应导出快照见 [`presets/dev-lean/global_script.js`](presets/dev-lean/global_script.js)。
 - **优先地区可视化配置**：支持为「默认节点」及任意服务分流组单独指定优先置顶地区（`preferRegion`），并支持服务组改名后一键同步规则目标。
-- **拖拽排序与顺序保留**：服务分流组与地区分组均支持按住左侧手柄拖拽排序，生成脚本严格保留你配置的地区展示与匹配顺序。
+- **拖拽排序与顺序冲突一键修复**：服务分流组与地区分组均支持拖拽排序并严格保留顺序；自动检测服务组间规则抢占冲突（广告/谷歌/YouTube、细分 AI/兜底组、Grok/X、Copilot/微软与 Github、Steam/游戏专用），在卡片与顶部提示并支持**一键调整顺序**。
 - **真实执行预览、静态诊断与命中模拟**：
   - 内置模拟订阅节点（支持直接粘贴节点名或 Clash YAML `proxies` 片段），在浏览器中真实运行 `main(config)`，实时预览代理组、分流规则、输出 YAML 与生成 JS；
-  - 自动进行静态诊断（死引用、未定义 `RULE-SET`、重名策略组、正则语法错误、规则顺序抢占警告）；
+  - 自动进行静态诊断（规则死引用、策略组死引用、未定义 `RULE-SET`、重名策略组、正则语法错误与 `MATCH` 后不可达规则）；
   - 内置**分流命中测试器**：输入域名、URL 或端口（如 `downloads.cursor.com`、`gemini.google.com`、`port:22`），高亮命中的规则行与完整代理链路。
 - **高效编辑体验**：支持暗色/亮色主题切换、轻量撤销（`Ctrl/Cmd+Z`）、URL 压缩分享链接（`#cfg=...`），以及 JSON 完整备份与 `.js` 脚本导入；全部数据仅存本地 `localStorage`，不经过任何后端。
 
@@ -90,8 +90,9 @@ clash-verge-rule-studio/
 | 项目 / 来源 | 用途 |
 | --- | --- |
 | [dahaha-365/YaNet](https://github.com/dahaha-365/YaNet) | 规则脚本结构与默认配置参考 |
-| [Koolson/Qure](https://github.com/Koolson/Qure) | 策略组彩色图标集 |
-| [MetaCubeX/meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat) | GeoIP / GeoSite / MMDB / ASN 数据库与 `category-bank-jp` 规则集 |
+| [Koolson/Qure](https://github.com/Koolson/Qure) / [zuluion/Qure](https://github.com/zuluion/Qure) | 策略组彩色图标集（含 Claude 图标） |
+| [MetaCubeX/meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat) | GeoIP / GeoSite / MMDB / ASN 数据库 |
+| [ACL4SSR](https://github.com/ACL4SSR/ACL4SSR) | 网易云音乐规则集 `NetEaseMusic.list` |
 | [DustinWin/ruleset_geodata](https://github.com/DustinWin/ruleset_geodata) | `applications.list`（下载软件规则集） |
 | [Sukka / ruleset.skk.moe](https://ruleset.skk.moe/) | 港澳台流媒体规则集（`stream_hk.txt` / `stream_tw.txt`） |
 | [217heidai/adblockfilters](https://github.com/217heidai/adblockfilters) | `adblockmihomo.mrs`（广告过滤规则集） |

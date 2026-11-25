@@ -180,6 +180,79 @@ assert(!(sandboxHit.matched && sandboxHit.matched.target === 'Gemini'), 'sandbox
 const mapsHit = YaNetGenerator.simulateRuleMatch('maps.googleapis.com', leanPrev.config)
 assert(!(mapsHit.matched && mapsHit.matched.target === 'Gemini'), 'maps.googleapis.com stays out of Gemini')
 
+const hitX = YaNetGenerator.simulateRuleMatch('x.com', leanPrev.config)
+assert(hitX.matched && hitX.matched.target === 'X', 'x.com routes to X')
+const hitGrokX = YaNetGenerator.simulateRuleMatch('grok.x.com', leanPrev.config)
+assert(hitGrokX.matched && hitGrokX.matched.target === 'Grok', 'grok.x.com stays on Grok, ahead of X')
+const hitNetease = YaNetGenerator.simulateRuleMatch('music.163.com', leanPrev.config)
+assert(hitNetease.matched && hitNetease.matched.target === '网易云音乐', 'music.163.com routes to 网易云音乐')
+
+const leanRules = leanPrev.config.rules
+const appleCnIdx = leanRules.findIndex((rule) => rule.startsWith('GEOSITE,apple-cn,直连'))
+const appleIdx = leanRules.findIndex((rule) => rule.startsWith('GEOSITE,apple,苹果服务'))
+assert(appleCnIdx >= 0 && appleIdx > appleCnIdx, 'apple-cn direct rule precedes the Apple group')
+const adsIdx = leanRules.findIndex((rule) => rule.startsWith('GEOSITE,category-ads-all,'))
+const youtubeIdx = leanRules.findIndex((rule) => rule.startsWith('GEOSITE,youtube,'))
+const googleIdx = leanRules.findIndex((rule) => rule.startsWith('GEOSITE,google,'))
+assert(adsIdx >= 0 && adsIdx < youtubeIdx && adsIdx < googleIdx, 'ads rules precede YouTube and Google')
+const neteaseIdx = leanRules.findIndex((rule) => rule.startsWith('DOMAIN-SUFFIX,music.163.com,'))
+const appleBeforeAds = leanRules.findIndex((rule) => rule.startsWith('GEOSITE,apple-cn,直连'))
+assert(neteaseIdx >= 0 && neteaseIdx < adsIdx, 'NetEase rules precede the ad block')
+assert(appleBeforeAds >= 0 && appleBeforeAds < adsIdx, 'Apple rules precede the ad block')
+assert(leanRules.some((rule) => rule === 'GEOSITE,discord,Discord'), 'Discord geosite rule is present')
+assert(leanRules.some((rule) => rule === 'GEOSITE,steam@cn,直连'), 'Steam CN rule is direct')
+assert(leanRules.some((rule) => rule === 'GEOSITE,steam,Steam'), 'Steam geosite rule is present')
+assert(!leanRules.some((rule) => rule.includes('日本网站') || rule.includes('GEOIP,jp')), 'Japan group is removed')
+assert(!stLean.services.some((svc) => svc.key === 'japan'), 'Japan service is absent from dev-lean')
+
+const mergedMedia = YaNetDefaults.applyDevLeanPreset(YaNetDefaults.createDefaultState())
+YaNetDefaults.applyServiceBundle(mergedMedia, 'media', 'merge')
+YaNetDefaults.applyServiceBundle(mergedMedia, 'social', 'merge')
+YaNetDefaults.applyServiceBundle(mergedMedia, 'games', 'merge')
+YaNetDefaults.applyServiceBundle(mergedMedia, 'dev', 'merge')
+const mergedPrev = YaNetGenerator.executeScriptPreview(YaNetGenerator.generateGlobalScript(mergedMedia), mergedMedia.sampleNodesText, mergedMedia)
+assert(mergedPrev.ok, 'merged bundles still execute')
+assert(mergedPrev.config.rules.some((rule) => rule === 'GEOSITE,youtube,流媒体'), 'merged media keeps the YouTube rule')
+const hitMergedX = YaNetGenerator.simulateRuleMatch('x.com', mergedPrev.config)
+assert(hitMergedX.matched && hitMergedX.matched.target === '社交媒体', 'merged social catches x.com')
+const hitMergedGrok = YaNetGenerator.simulateRuleMatch('grok.x.com', mergedPrev.config)
+assert(hitMergedGrok.matched && hitMergedGrok.matched.target === 'Grok', 'grok.x.com stays on Grok after social merge')
+assert(mergedPrev.config.rules.some((rule) => rule === 'GEOSITE,steam@cn,直连'), 'merged games keeps Steam CN direct')
+assert(mergedPrev.config.rules.some((rule) => rule === 'GEOSITE,github,微软服务'), 'merged dev sends GitHub through 微软服务')
+assert(YaNetGenerator.diagnoseConfig(mergedMedia, mergedPrev).length === 0, 'legal merged order has 0 diagnostics')
+const defaultState = YaNetDefaults.createDefaultState()
+const defaultPrev = YaNetGenerator.executeScriptPreview(
+  YaNetGenerator.generateGlobalScript(defaultState),
+  defaultState.sampleNodesText,
+  defaultState
+)
+const hitDefaultGrok = YaNetGenerator.simulateRuleMatch('grok.x.com', defaultPrev.config)
+assert(hitDefaultGrok.matched && hitDefaultGrok.matched.target === '国外AI', 'merged AI keeps grok.x.com off X')
+YaNetDefaults.applyDevLeanPreset(mergedMedia)
+assert(mergedMedia.services.some((svc) => svc.key === 'youtube') && !mergedMedia.services.some((svc) => svc.key === 'media'), 'dev-lean expands a merged media bundle')
+assert(mergedMedia.services.filter((svc) => svc.key === 'youtube').length === 1, 'dev-lean does not duplicate YouTube')
+
+// Resetting media split on default or dev-lean keeps youtube after ads and preserves 0 violations
+const resetDefaultMedia = YaNetDefaults.createDefaultState()
+YaNetDefaults.applyServiceBundle(resetDefaultMedia, 'media', 'split')
+assert(YaNetDefaults.serviceOrderViolations(resetDefaultMedia.services).length === 0, 'media split reset on default keeps 0 violations')
+const resetLeanMedia = YaNetDefaults.applyDevLeanPreset(YaNetDefaults.createDefaultState())
+YaNetDefaults.applyServiceBundle(resetLeanMedia, 'media', 'split')
+assert(YaNetDefaults.serviceOrderViolations(resetLeanMedia.services).length === 0, 'media split reset on dev-lean keeps 0 violations')
+const resetLeanKeys = resetLeanMedia.services.map((svc) => svc.key)
+assert(resetLeanKeys.indexOf('netease') < resetLeanKeys.indexOf('ads'), 'media split reset preserves netease before ads')
+assert(resetLeanKeys.indexOf('apple') < resetLeanKeys.indexOf('ads'), 'media split reset preserves apple before ads')
+
+// Moving games before steam triggers shadow-games and repair fixes it
+const stGamesOrder = YaNetDefaults.applyDevLeanPreset(YaNetDefaults.createDefaultState())
+const gamesIdx = stGamesOrder.services.findIndex((svc) => svc.key === 'games')
+const steamIdx = stGamesOrder.services.findIndex((svc) => svc.key === 'steam')
+const [movedGames] = stGamesOrder.services.splice(gamesIdx, 1)
+stGamesOrder.services.splice(steamIdx, 0, movedGames)
+assert(YaNetDefaults.serviceOrderViolations(stGamesOrder.services).some((item) => item.code === 'shadow-games'), 'games before steam triggers shadow-games')
+stGamesOrder.services = YaNetDefaults.repairServiceOrder(stGamesOrder.services)
+assert(YaNetDefaults.serviceOrderViolations(stGamesOrder.services).length === 0, 'repairServiceOrder fixes shadow-games')
+
 const hitSsh = YaNetGenerator.simulateRuleMatch('port:22', leanPrev.config)
 assert(hitSsh.matched && hitSsh.matched.type === 'DST-PORT' && hitSsh.matched.target === '直连', 'port:22 matches DST-PORT 直连')
 
@@ -193,6 +266,28 @@ stBad.systemGroups.downloadGroup.proxies.push('不存在的候选')
 const badPrev = YaNetGenerator.executeScriptPreview(YaNetGenerator.generateGlobalScript(stBad), stBad.sampleNodesText, stBad)
 const badDiags = YaNetGenerator.diagnoseConfig(stBad, badPrev)
 assert(badDiags.some((d) => d.code === 'shadow-google'), 'diagnoseConfig detects Google shadowing YouTube/Gemini')
+
+const stRepair = YaNetDefaults.applyDevLeanPreset(YaNetDefaults.createDefaultState())
+const repairGoogle = stRepair.services.findIndex((svc) => svc.key === 'google')
+const [repairAds] = stRepair.services.splice(stRepair.services.findIndex((svc) => svc.key === 'ads'), 1)
+stRepair.services.splice(repairGoogle, 0, repairAds)
+assert(YaNetDefaults.serviceOrderViolations(stRepair.services).some((item) => item.code === 'shadow-ads'), 'ads after YouTube is a violation')
+const orderWithoutAds = stRepair.services.map((svc) => svc.key).filter((key) => key !== 'ads')
+stRepair.services = YaNetDefaults.repairServiceOrder(stRepair.services)
+assert(YaNetDefaults.serviceOrderViolations(stRepair.services).length === 0, 'repair clears order violations')
+const repairedAds = stRepair.services.findIndex((svc) => svc.key === 'ads')
+const repairedYt = stRepair.services.findIndex((svc) => svc.key === 'youtube')
+const repairedGoogle = stRepair.services.findIndex((svc) => svc.key === 'google')
+assert(repairedAds < repairedYt && repairedYt < repairedGoogle, 'repair puts ads before YouTube before Google')
+assert(
+  stRepair.services.map((svc) => svc.key).filter((key) => key !== 'ads').join('|') === orderWithoutAds.join('|'),
+  'repair keeps every other group in place'
+)
+const legalOrder = YaNetDefaults.applyDevLeanPreset(YaNetDefaults.createDefaultState()).services.map((svc) => svc.key)
+const repairedLegal = YaNetDefaults.repairServiceOrder(
+  YaNetDefaults.applyDevLeanPreset(YaNetDefaults.createDefaultState()).services
+).map((svc) => svc.key)
+assert(legalOrder.join('|') === repairedLegal.join('|'), 'repair leaves a legal order unchanged')
 assert(badDiags.some((d) => d.code === 'dead-rule-target'), 'diagnoseConfig detects dead rule target')
 assert(badDiags.some((d) => d.code === 'dead-group-proxy'), 'diagnoseConfig detects dead proxy-group member')
 

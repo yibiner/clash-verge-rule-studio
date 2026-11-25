@@ -28,7 +28,7 @@ const _foreignIpDns = "8.8.8.8;94.140.14.14"
 
 const defaultArgs = {
   enable: true,
-  ruleSet: "ai_cursor;ai_gemini;ai_openai;ai_claude;ai_grok;ai_other;youtube;google;github;microsoft;apple;whatsapp;telegram;line;spotify;biliintl;tiktok;mediaHMT;games;ads",
+  ruleSet: "ai_cursor;ai_gemini;ai_openai;ai_claude;ai_grok;ai_other;github;microsoft;apple;discord;x;steam;netease;whatsapp;telegram;line;spotify;biliintl;tiktok;mediaHMT;games;ads;youtube;google",
   regionSet: "all",
   interfaceName: "",
   excludeHighPercentage: true,
@@ -152,11 +152,13 @@ let ruleOptions = {
   "ai_grok": false,
   "ai_copilot": false,
   "ai_other": false,
-  "youtube": false,
-  "google": false,
   "github": false,
   "microsoft": false,
   "apple": false,
+  "discord": false,
+  "x": false,
+  "steam": false,
+  "netease": false,
   "whatsapp": false,
   "telegram": false,
   "line": false,
@@ -166,6 +168,8 @@ let ruleOptions = {
   "mediaHMT": false,
   "games": false,
   "ads": false,
+  "youtube": false,
+  "google": false,
   "bahamut": false,
   "netflix": false,
   "disney": false,
@@ -173,7 +177,6 @@ let ruleOptions = {
   "hbo": false,
   "primevideo": false,
   "hulu": false,
-  "japan": false,
 }
 
 if (ruleSet === 'all') {
@@ -305,7 +308,6 @@ const dnsConfig = {
     "geosite:telegram",
     "geosite:google",
     "geosite:amazon",
-    "geosite:category-bank-jp",
     "geosite:category-communication",
     "geosite:gfw",
   ],
@@ -431,7 +433,7 @@ const serviceConfigs = [
   {
     key: "ai_claude",
     name: "Claude",
-    icon: "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/AI.png",
+    icon: "https://raw.githubusercontent.com/zuluion/Qure/master/IconSet/Color/Claude.png",
     url: "https://claude.ai/cdn-cgi/trace",
     rules: [
       "DOMAIN-SUFFIX,anthropic.com,Claude",
@@ -487,24 +489,6 @@ const serviceConfigs = [
     preferRegion: "SG",
   },
   {
-    key: "youtube",
-    name: "YouTube",
-    icon: "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/YouTube.png",
-    url: "https://www.youtube.com/s/desktop/494dd881/img/favicon.ico",
-    rules: [
-      "GEOSITE,youtube,YouTube",
-    ],
-  },
-  {
-    key: "google",
-    name: "谷歌服务",
-    icon: "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Google_Search.png",
-    url: "https://www.google.com/generate_204",
-    rules: [
-      "GEOSITE,google,谷歌服务",
-    ],
-  },
-  {
     key: "github",
     name: "Github",
     icon: "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/GitHub.png",
@@ -529,13 +513,65 @@ const serviceConfigs = [
     icon: "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Apple_2.png",
     url: "https://www.apple.com/library/test/success.html",
     rules: [
-      "GEOSITE,apple-cn,苹果服务",
+      "GEOSITE,apple-cn,直连",
+      "GEOSITE,apple,苹果服务",
     ],
+  },
+  {
+    key: "discord",
+    name: "Discord",
+    icon: "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Discord.png",
+    url: "https://discord.com/api/v9/gateway",
+    rules: [
+      "GEOSITE,discord,Discord",
+    ],
+  },
+  {
+    key: "x",
+    name: "X",
+    icon: "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Twitter.png",
+    url: "https://x.com/",
+    rules: [
+      "GEOSITE,twitter,X",
+      "DOMAIN-SUFFIX,x.com,X",
+      "DOMAIN-SUFFIX,twitter.com,X",
+    ],
+  },
+  {
+    key: "steam",
+    name: "Steam",
+    icon: "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Steam.png",
+    url: "https://store.steampowered.com/",
+    rules: [
+      "GEOSITE,steam@cn,直连",
+      "GEOSITE,steam,Steam",
+    ],
+  },
+  {
+    key: "netease",
+    name: "网易云音乐",
+    icon: "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Netease_Music.png",
+    url: "https://music.163.com/",
+    rules: [
+      "DOMAIN-SUFFIX,music.163.com,网易云音乐",
+      "DOMAIN-SUFFIX,music.126.net,网易云音乐",
+      "RULE-SET,netease-music,网易云音乐",
+    ],
+    providers: [
+      {
+        key: "netease-music",
+        url: "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Ruleset/NetEaseMusic.list",
+        path: "./ruleset/ACL4SSR/NetEaseMusic.list",
+        format: "text",
+        behavior: "classical",
+      },
+    ],
+    directFirst: true,
   },
   {
     key: "whatsapp",
     name: "WhatsApp",
-    icon: "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/WhatsApp.png",
+    icon: "https://static.whatsapp.net/rsrc.php/v3/yP/r/rYZqPCBaG70.png",
     url: "https://web.whatsapp.com/data/manifest.json",
     rules: [
       "GEOSITE,whatsapp,WhatsApp",
@@ -643,6 +679,24 @@ const serviceConfigs = [
     reject: true,
   },
   {
+    key: "youtube",
+    name: "YouTube",
+    icon: "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/YouTube.png",
+    url: "https://www.youtube.com/s/desktop/494dd881/img/favicon.ico",
+    rules: [
+      "GEOSITE,youtube,YouTube",
+    ],
+  },
+  {
+    key: "google",
+    name: "谷歌服务",
+    icon: "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Google_Search.png",
+    url: "https://www.google.com/generate_204",
+    rules: [
+      "GEOSITE,google,谷歌服务",
+    ],
+  },
+  {
     key: "bahamut",
     name: "巴哈姆特",
     icon: "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Bahamut.png",
@@ -704,25 +758,6 @@ const serviceConfigs = [
     url: "https://auth.hulu.com/v4/web/password/authenticate",
     rules: [
       "GEOSITE,hulu,Hulu",
-    ],
-  },
-  {
-    key: "japan",
-    name: "日本网站",
-    icon: "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/JP.png",
-    url: "https://r.r10s.jp/com/img/home/logo/touch.png",
-    rules: [
-      "RULE-SET,category-bank-jp,日本网站",
-      "GEOIP,jp,日本网站,no-resolve",
-    ],
-    providers: [
-      {
-        key: "category-bank-jp",
-        url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-bank-jp.mrs",
-        path: "./ruleset/MetaCubeX/category-bank-jp.mrs",
-        format: "mrs",
-        behavior: "domain",
-      },
     ],
   },
 ]

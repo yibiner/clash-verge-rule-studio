@@ -1202,52 +1202,16 @@ ${fallbackRulesLines}
     }
 
     // 3. 服务顺序抢占检查
-    const enabledServices = (state.services || []).filter((s) => s.enabled)
-    const posOf = (key) => enabledServices.findIndex((s) => s.key === key)
-    const googlePos = posOf('google')
-    if (googlePos >= 0) {
-      for (const [k, label] of [
-        ['youtube', 'YouTube'],
-        ['ai_gemini', 'Gemini'],
-      ]) {
-        const p = posOf(k)
-        if (p > googlePos) {
-          diagnostics.push({
-            level: 'warn',
-            code: 'shadow-google',
-            message: `「谷歌服务」排在「${label}」之前，GEOSITE,google 可能会提前抢占「${label}」的流量。`,
-          })
-        }
-      }
-    }
-    const aiOtherPos = posOf('ai_other')
-    if (aiOtherPos >= 0) {
-      for (const k of ['ai_openai', 'ai_claude', 'ai_gemini', 'ai_cursor', 'ai_grok', 'ai_copilot']) {
-        const p = posOf(k)
-        if (p > aiOtherPos) {
-          diagnostics.push({
-            level: 'warn',
-            code: 'shadow-ai-other',
-            message: `「其他国外AI」排在「${enabledServices[p].name}」之前，兜底规则可能抢占细分 AI 流量。`,
-          })
-        }
-      }
-    }
-    const copilotPos = posOf('ai_copilot')
-    if (copilotPos >= 0) {
-      for (const [k, label] of [
-        ['github', 'Github'],
-        ['microsoft', '微软服务'],
-      ]) {
-        const p = posOf(k)
-        if (p >= 0 && p < copilotPos) {
-          diagnostics.push({
-            level: 'warn',
-            code: 'shadow-copilot',
-            message: `「${label}」排在「Copilot」之前，可能抢占 Copilot 相关域名。`,
-          })
-        }
-      }
+    const orderViolations =
+      global.YaNetDefaults && typeof global.YaNetDefaults.serviceOrderViolations === 'function'
+        ? global.YaNetDefaults.serviceOrderViolations(state.services)
+        : []
+    for (const violation of orderViolations) {
+      diagnostics.push({
+        level: 'warn',
+        code: violation.code,
+        message: violation.message,
+      })
     }
 
     // 4. 运行产物校验（重名组、死引用、未定义 rule-provider、MATCH 之后不可达规则）
